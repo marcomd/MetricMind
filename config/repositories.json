@@ -1,0 +1,22 @@
+{
+  "repositories": [
+    {
+      "name": "mater",
+      "path": "~/Lavoro/Rails7/mater",
+      "description": "Mater application",
+      "enabled": true
+    },
+    {
+      "name": "metis",
+      "path": "~/Lavoro/Rails5/metis",
+      "description": "Metis application",
+      "enabled": true
+    },
+    {
+      "name": "teti",
+      "path": "~/Lavoro/Rails5/teti",
+      "description": "Teti application",
+      "enabled": true
+    }
+  ]
+}

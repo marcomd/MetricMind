@@ -1,0 +1,47 @@
+# Ruby
+*.gem
+*.rbc
+/.config
+/coverage/
+/InstalledFiles
+/pkg/
+/spec/reports/
+/spec/examples.txt
+/test/tmp/
+/test/version_tmp/
+/tmp/
+
+# Bundler
+/.bundle/
+/vendor/bundle
+Gemfile.lock
+
+# RSpec
+spec/examples.txt
+
+# Environment variables
+.env
+.env.local
+
+# Data exports (JSON/CSV files)
+/data/*.json
+/data/*.csv
+/data/exports/
+
+# Database
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
