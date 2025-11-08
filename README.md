@@ -57,7 +57,7 @@ This system provides comprehensive analytics to answer questions like:
 
 ### Prerequisites
 
-- Ruby >= 2.7
+- Ruby >= 3.3
 - PostgreSQL >= 12
 - jq (for orchestration script)
 - Git repositories to analyze
@@ -396,6 +396,9 @@ PGDATABASE=git_analytics
 PGUSER=your_username
 PGPASSWORD=your_password
 
+# PostgreSQL Test Database Configuration
+PGDATABASE_TEST=git_analytics_test
+
 # Optional: Default extraction dates
 DEFAULT_FROM_DATE="6 months ago"
 DEFAULT_TO_DATE="now"
@@ -492,6 +495,262 @@ If you need to clean and reload data for a repository (e.g., after accidentally 
 # Or use the cleanup script directly
 ./scripts/clean_repository.rb mater
 ```
+
+## Building the Dashboard on Replit
+
+This section provides functional requirements and specifications for building an interactive analytics dashboard on Replit. Replit will handle the technical implementation details.
+
+### Dashboard Purpose
+
+This is the dashboard for MetricMind project in which we collect data from various git repositories to provide an overview of our progress.
+The dashboard should provide an intuitive, visually appealing interface to explore git productivity metrics and answer key questions:
+- How is productivity trending over time?
+  - Overview
+    - Totals (repositories, commits, contributors)
+    - Repositories detail: description, Commits, Contributors, last update
+    - repositories comparison
+  - The commits trend for all repository or a selected one
+  - A line chart "Lines Changed vs Added vs Deleted" 
+  - Three cards: "Avg Commits/Month", "Avg Lines/Commit", "Avg Contributors/Month"
+  - Filters: repository, the period (last 3, 6, 12, 24 months, all), a checkox per committer
+    - per committer means, for example, if the trend shows the 200 commits at "2025-10" for "All repositories" -> if the user clicks on the checkbox "per commmitter" and supposing the total number of committers is 45, we show 4.4 (200/45).
+- Who are the most active contributors?
+  - consider committers could have different domain e.g. foo.bar@iubenda.com and foo.bar@team.blue, but we can use the name to indentify it
+  - filters: repository, period, email (e.g. @team.blue will only compare email with this domain)
+
+### Architecture Overview
+
+```
+┌─────────────────────────────────────────┐
+│         Web Frontend (Browser)          │
+│   ┌─────────────────────────────────┐   │
+│   │ Dashboard Views                 │   │
+│   │  • Overview                     │   │
+│   │  • Trends                       │   │
+│   │  • Contributors                 │   │
+│   │  • Activity                     │   │
+│   │  • Comparison                   │   │
+│   │  • Before/After Analysis        │   │
+│   └─────────────────────────────────┘   │
+└───────────────┬─────────────────────────┘
+                │ HTTP requests
+                ▼
+┌─────────────────────────────────────────┐
+│           REST API Server               │
+│  (Connects to existing PostgreSQL DB)  │
+└─────────────────────────────────────────┘
+```
+
+### Required API Endpoints
+
+The backend should expose these RESTful endpoints to serve data to the frontend:
+
+#### Repository Management
+- **GET /api/repos** - List all repositories with summary statistics
+  - Returns: Repository ID, name, description, total commits, latest commit date, contributor count
+
+#### Trends & Analytics
+- **GET /api/monthly-trends** - Global monthly trends across all repositories
+  - Returns: Aggregated monthly data for all repositories combined
+  - Fields: month, total commits, total lines changed, unique authors, avg lines per commit
+
+- **GET /api/monthly-trends/:repoName** - Monthly trends for a specific repository
+  - Returns: Monthly statistics for the specified repository
+  - Fields: month, commits, lines added/deleted, authors, averages per author
+
+#### Contributors
+- **GET /api/contributors** - Top contributors across all repositories
+  - Query params: `limit` (default: 20)
+  - Returns: Contributor name, email, total commits, repositories contributed to, lines changed
+  - Sorted by: Total commits (descending)
+
+#### Activity
+- **GET /api/daily-activity** - Daily commit activity
+  - Query params: `days` (default: 30)
+  - Returns: Date, repository, commits, lines changed, unique authors
+
+#### Comparison & Analysis
+- **GET /api/compare-repos** - Compare all repositories side-by-side
+  - Returns: Repository statistics for last 6 months
+  - Fields: total commits, lines changed, months active, avg authors, avg lines per commit
+
+- **GET /api/before-after/:repoName** - Compare two time periods for impact analysis
+  - Query params: `beforeStart`, `beforeEnd`, `afterStart`, `afterEnd`
+  - Returns: Average metrics for "before" and "after" periods
+  - Use case: Measure impact of tools, processes, or team changes
+
+### Dashboard Views
+
+The frontend should provide these main views:
+
+#### 1. Overview Page
+**Purpose**: High-level snapshot of all repository activity
+
+**Key Components**:
+- Summary statistics cards (total repos, commits, contributors, active repos)
+- Repository cards grid showing each repo with key metrics
+- Bar chart comparing repositories by commit volume
+- Quick access navigation to detailed views
+
+**User Experience**:
+- Should load quickly and provide immediate value
+- Visual hierarchy emphasizing most important metrics
+- Color-coded indicators for activity levels
+
+#### 2. Trends Page
+**Purpose**: Visualize productivity patterns over time
+
+**Key Components**:
+- Repository selector dropdown (or "All Repositories" for global view)
+- Area/line chart showing commit volume over last 12 months
+- Dual-line chart comparing lines added vs deleted
+- Summary cards showing averages (commits/month, lines/commit, contributors/month)
+
+**User Experience**:
+- Smooth chart animations on load
+- Interactive tooltips showing exact values on hover
+- Easy toggling between individual repos and global trends
+- Visual indicators for trends (increasing/decreasing)
+
+#### 3. Contributors Page
+**Purpose**: Recognize and analyze contributor activity
+
+**Key Components**:
+- "Podium" visual for top 3 contributors (🏆 1st, 🥈 2nd, 🥉 3rd)
+- Horizontal bar chart showing top 15-20 contributors
+- Detailed table with sortable columns:
+  - Rank, Name, Email
+  - Total commits, Repositories contributed
+  - Lines changed, Average lines per commit
+- Filter/search capability
+
+**User Experience**:
+- Gamification elements to make it engaging
+- Clear visual hierarchy (top 3 stand out)
+- Easy identification of most active contributors
+- Responsive table that works on mobile
+
+#### 4. Activity Page
+**Purpose**: Track day-to-day commit patterns
+
+**Key Components**:
+- Calendar heatmap showing commit activity (darker = more commits)
+- Timeline view showing recent commits
+- Activity distribution charts (by day of week, hour of day)
+- Repository filter to focus on specific projects
+
+**User Experience**:
+- Quick identification of high/low activity periods
+- Visual patterns reveal work habits
+- Interactive filtering and date range selection
+
+#### 5. Comparison Page
+**Purpose**: Compare repositories side-by-side
+
+**Key Components**:
+- Side-by-side metrics cards for each repository
+- Multi-series bar chart comparing key metrics
+- Sortable table showing all comparison metrics
+- Percentage indicators showing relative activity
+
+**User Experience**:
+- Easy identification of most/least active projects
+- Clear visual differentiation between repositories
+- Insights into resource allocation and project health
+
+#### 6. Before/After Analysis Page
+**Purpose**: Measure impact of changes (new tools, processes, team changes)
+
+**Key Components**:
+- Repository selector
+- Date range pickers for "Before" and "After" periods
+- Split-screen comparison cards showing metrics side-by-side
+- Percentage change indicators (↑ ↓) with color coding
+- Visualization comparing the two periods
+
+**Metrics to Compare**:
+- Average commits per month
+- Average lines changed per commit
+- Average contributors per month
+- Total lines added/deleted
+
+**User Experience**:
+- Clear visual separation of "before" vs "after"
+- Prominent percentage changes (green for improvement, red for decline)
+- Easy reconfiguration of time periods
+- Shareable results (export or URL parameters)
+
+### Design Requirements
+
+**Visual Style**:
+- Modern, clean interface with good use of whitespace
+- Smooth animations and transitions
+- Responsive design (works on desktop, tablet, mobile)
+- Dark mode support for reduced eye strain
+
+**Color Scheme**:
+- Primary: Blue tones for professionalism and trust
+- Secondary: Purple for accent and emphasis
+- Success: Green for positive metrics and growth
+- Warning: Orange for caution
+- Danger: Red for negative trends or issues
+- Use gradients for depth and visual interest
+
+**User Experience Principles**:
+- **Fast Loading**: Show loading states, but optimize for speed
+- **Progressive Disclosure**: Start with overview, allow drilling down
+- **Feedback**: Visual feedback for all interactions
+- **Consistency**: Consistent patterns across all views
+- **Accessibility**: Proper contrast, keyboard navigation, screen reader support
+
+### Database Connection
+
+The API should connect to the existing PostgreSQL database created by the data pipeline:
+- Use environment variables for credentials (PGHOST, PGDATABASE, PGUSER, PGPASSWORD)
+- Leverage existing views and materialized views:
+  - `mv_monthly_stats_by_repo` - Pre-computed monthly statistics
+  - `v_contributor_stats` - Aggregated contributor data
+  - `v_daily_stats_by_repo` - Daily activity aggregations
+  - `v_commit_details` - Detailed commit information with repository joins
+
+### Deployment Considerations
+
+**Environment Variables**: Configure these in Replit Secrets
+- Database connection parameters
+- API base URLs (if frontend/backend are separate)
+- Any API keys for future integrations
+
+**Performance**:
+- Use database connection pooling
+- Cache frequently accessed data where appropriate
+- Implement pagination for large datasets
+- Optimize SQL queries (database already has indexes)
+
+**Security**:
+- Enable CORS appropriately
+- Validate all inputs
+- Use parameterized queries (no SQL injection)
+- Don't expose sensitive information in error messages
+
+### Success Metrics
+
+The dashboard should achieve:
+- **"WoW Factor"**: Impressive visual design that makes users excited to explore data
+- **Insights Clarity**: Users can quickly answer key questions about productivity
+- **Performance**: Page loads under 2 seconds, chart animations smooth (60fps)
+- **Usability**: New users can navigate without training
+- **Responsiveness**: Works well on devices from phone to desktop
+
+### Getting Started with Replit
+
+1. Create a new Repl on [Replit](https://replit.com)
+2. Choose appropriate template (Node.js recommended for full-stack)
+3. Connect to your existing PostgreSQL database using Replit Secrets
+4. Implement the API endpoints according to the specifications above
+5. Build the frontend views based on the functional requirements
+6. Deploy when ready using Replit's deployment features
+
+Replit will guide you through the technical implementation based on these functional requirements.
 
 ## Roadmap
 

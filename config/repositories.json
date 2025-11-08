@@ -17,6 +17,24 @@
       "path": "~/Lavoro/Rails5/teti",
       "description": "Teti application",
       "enabled": true
+    },
+    {
+      "name": "hits_explorer",
+      "path": "~/Lavoro/Rails7/hits_explorer",
+      "description": "Hits Explorer application",
+      "enabled": true
+    },
+    {
+      "name": "radar",
+      "path": "~/Lavoro/JS/iubenda-radar",
+      "description": "Radar application",
+      "enabled": true
+    },
+    {
+      "name": "iub_cookie_solution",
+      "path": "~/Lavoro/JS/iub_cookie_solution",
+      "description": "Cookie Solution application",
+      "enabled": true
     }
   ]
 }
