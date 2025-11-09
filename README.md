@@ -55,14 +55,91 @@ This system provides comprehensive analytics to answer questions like:
 
 ## Quick Start
 
+### Complete Setup in 4 Steps
+
+```bash
+# 1. Run automated setup
+./scripts/setup.sh
+
+# 2. Edit configuration files
+vim .env                        # Database credentials (if needed)
+vim config/repositories.json    # Add your repositories
+
+# 3. Extract and analyze
+./scripts/run.sh                # Automatic extraction, loading, categorization
+
+# 4. Query your data
+psql -d git_analytics -c "SELECT * FROM v_category_stats;"
+```
+
+That's it! The system automatically handles schema setup, migrations, data extraction, commit categorization, and view optimization.
+
+**What happens automatically:**
+- ✅ Database creation and schema initialization
+- ✅ Migration application (category column)
+- ✅ View creation (standard + category analytics)
+- ✅ Git data extraction from all repositories
+- ✅ Commit categorization (business domain extraction)
+- ✅ Materialized view refresh (optimized queries)
+
+The setup procedure supports two modes:
+
+Full Setup Mode (default):
+`./scripts/setup.sh`
+
+- [1/6] Check prerequisites (Ruby, PostgreSQL, jq)
+- [2/6] Install Ruby dependencies
+- [3/6] Create .env file
+- [4/6] Create databases (production + test)
+- [5/6] Initialize schemas + migrations + views
+- [6/6] Create data directories
+
+Database-Only Mode:
+`./scripts/setup.sh --database-only`
+
+- [1/3] Check PostgreSQL only
+- [2/3] Create databases (production + test)
+- [3/3] Initialize schemas + migrations + views
+
+---
+
 ### Prerequisites
 
-- Ruby >= 3.3
-- PostgreSQL >= 12
-- jq (for orchestration script)
-- Git repositories to analyze
+Before starting, ensure you have:
+- **Ruby** >= 3.3 ([Installation guide](https://www.ruby-lang.org/en/documentation/installation/))
+- **PostgreSQL** >= 12 ([Installation guide](https://www.postgresql.org/download/))
+- **jq** (for multi-repo orchestration) - Install with: `brew install jq` (macOS) or `apt-get install jq` (Linux)
+- **Git repositories** to analyze
 
-### 1. Installation
+### Automated Setup (Recommended)
+
+The fastest way to get started is using the automated setup script:
+
+```bash
+# Clone or navigate to the project directory
+cd MetricMind
+
+# Run the automated setup script
+./scripts/setup.sh
+```
+
+**What this script does:**
+1. ✅ Checks prerequisites (Ruby, PostgreSQL, jq)
+2. ✅ Installs Ruby dependencies (`bundle install`)
+3. ✅ Creates `.env` file from template
+4. ✅ Creates production and test databases
+5. ✅ Initializes database schema and views (including migrations)
+6. ✅ Creates necessary directories (`data/exports/`)
+
+After the script completes, you'll be prompted to:
+- Edit your `.env` file with database credentials (if needed)
+- Configure repositories in `config/repositories.json`
+
+### Manual Setup (Alternative)
+
+If you prefer manual setup or need more control:
+
+#### 1. Install Dependencies
 
 ```bash
 # Install Ruby dependencies
@@ -73,18 +150,22 @@ cp .env.example .env
 # Edit .env with your database credentials
 ```
 
-### 2. Database Setup
+#### 2. Database Setup
 
 ```bash
-# Create database
-createdb git_analytics
-
-# Initialize schema
-psql -d git_analytics -f schema/postgres_schema.sql
-psql -d git_analytics -f schema/postgres_views.sql
+# Run database-only setup (creates database, applies schema, migrations, and views)
+./scripts/setup.sh --database-only
 ```
 
-### 3. Configure Repositories
+This will:
+- Create the database if it doesn't exist
+- Apply the base schema
+- Run all migrations (including category column for business domain tracking)
+- Create standard views and category views
+
+**Note:** This skips Ruby dependencies and .env setup. Use `./scripts/setup.sh` (without flags) for complete first-time setup.
+
+#### 3. Configure Repositories
 
 Edit `config/repositories.json` to add your repositories:
 
@@ -96,6 +177,12 @@ Edit `config/repositories.json` to add your repositories:
       "path": "/absolute/path/to/repo",
       "description": "Backend API",
       "enabled": true
+    },
+    {
+      "name": "my-frontend",
+      "path": "/absolute/path/to/frontend",
+      "description": "React Frontend",
+      "enabled": true
     }
   ]
 }
@@ -103,7 +190,7 @@ Edit `config/repositories.json` to add your repositories:
 
 **Note:** Database connection and extraction settings are configured via `.env` file (see Environment Variables section below). The `config/repositories.json` file only contains the list of repositories to track.
 
-### 4. Extract and Load Data
+### Extract and Load Data
 
 ```bash
 # Run extraction and loading for all configured repositories
@@ -118,6 +205,22 @@ Edit `config/repositories.json` to add your repositories:
 # Clean before processing (useful for fixing duplicate data)
 ./scripts/run.sh --clean
 ```
+
+The `run.sh` script automatically:
+- Extracts git data from repositories
+- Loads data into the database
+- **Categorizes commits** (extracts business domains from commit messages)
+- **Refreshes materialized views** (for fast dashboard queries)
+
+No additional steps needed - everything runs automatically!
+
+**What's included:**
+- ✅ Git data extraction from all configured repositories
+- ✅ Database loading with duplicate prevention
+- ✅ **Automatic commit categorization** (extracts business domains like BILLING, CS, INFRA from commit messages)
+- ✅ **Materialized view refresh** (ensures dashboard queries are fast)
+
+See [Commit Categorization](#commit-categorization) section for details on how categories are extracted.
 
 ## Usage
 
@@ -496,6 +599,119 @@ If you need to clean and reload data for a repository (e.g., after accidentally 
 ./scripts/clean_repository.rb mater
 ```
 
+## Commit Categorization
+
+The categorization feature analyzes commit messages to understand **what** business domains developers are working on.
+
+### Overview
+
+Categorization extracts **business domain categories** from commit subjects, enabling insights into resource allocation across different areas of your product (e.g., BILLING, CS, INFRA).
+
+**Note:** Categorization runs **automatically** as part of `./scripts/run.sh`. You don't need to run any manual commands unless you want to re-categorize existing data or check coverage.
+
+### Category Extraction
+
+Categories are extracted from commit subjects using multiple patterns:
+
+1. **Pipe delimiter**: `BILLING | Implemented payment gateway` → **BILLING**
+2. **Square brackets**: `[CS] Fixed widget display` → **CS**
+3. **First uppercase word**: `BILLING Implemented feature` → **BILLING**
+4. **No match**: → NULL (shown as UNCATEGORIZED in dashboard)
+
+### Manual Usage (Optional)
+
+Categorization runs automatically with `./scripts/run.sh`, but you can also run it manually:
+
+```bash
+# Re-run categorization on all commits (useful after updating commit messages)
+./scripts/categorize_commits.rb
+
+# Preview changes without applying (dry-run)
+./scripts/categorize_commits.rb --dry-run
+
+# Categorize specific repository only
+./scripts/categorize_commits.rb --repo mater
+```
+
+### Checking Coverage
+
+```bash
+# Check categorization coverage
+psql -d git_analytics -c "
+  SELECT
+    COUNT(*) as total_commits,
+    COUNT(category) as categorized,
+    ROUND(COUNT(category)::numeric / COUNT(*) * 100, 1) as category_pct
+  FROM commits;
+"
+
+# View category distribution
+psql -d git_analytics -c "SELECT * FROM v_category_stats ORDER BY total_commits DESC;"
+
+# Find uncategorized commits
+psql -d git_analytics -c "SELECT * FROM v_uncategorized_commits LIMIT 20;"
+```
+
+### Insights Enabled
+
+With categorization, you can answer:
+- "How much effort went into BILLING vs CS last quarter?"
+- "Which business domains are receiving most attention?"
+- "Are certain areas neglected?"
+- "How has effort distribution changed over time?"
+- "Which categories need more resources?"
+
+### Improving Coverage
+
+To improve categorization coverage:
+
+1. **Standardize commit message format** - Encourage your team to use consistent prefixes:
+   ```
+   BILLING | Description
+   CS | Description
+   INFRA | Description
+   ```
+
+2. **Update old commits manually** if needed:
+   ```sql
+   -- Categorize commits containing "billing" keyword
+   UPDATE commits SET category = 'BILLING'
+   WHERE subject ILIKE '%billing%' AND category IS NULL;
+
+   -- Categorize commits containing "customer service" or "cs"
+   UPDATE commits SET category = 'CS'
+   WHERE (subject ILIKE '%customer service%' OR subject ILIKE '% cs %')
+     AND category IS NULL;
+   ```
+
+3. **Document your categories** - Create a team guideline listing all valid categories
+
+### Database Views
+
+Leverage existing views and materialized views:
+
+- `mv_monthly_stats_by_repo` - Pre-computed monthly statistics
+- `v_contributor_stats` - Aggregated contributor data
+- `v_daily_stats_by_repo` - Daily activity aggregations
+- `v_commit_details` - Detailed commit information with repository joins
+
+Categorization creates these views:
+
+- `v_category_stats` - Category statistics across all repos
+- `v_category_by_repo` - Category breakdown per repository
+- `mv_monthly_category_stats` - Monthly category trends (materialized)
+- `v_uncategorized_commits` - Commits missing categories
+
+### Maintenance
+
+**Note:** When you run `./scripts/run.sh`, categorization and view refresh happen **automatically**. No manual maintenance needed!
+
+If you need to manually refresh views (e.g., after manual database updates):
+```bash
+# Refresh materialized views
+psql -d git_analytics -c "SELECT refresh_category_mv();"
+```
+
 ## Building the Dashboard on Replit
 
 This section provides functional requirements and specifications for building an interactive analytics dashboard on Replit. Replit will handle the technical implementation details.
@@ -579,6 +795,19 @@ The backend should expose these RESTful endpoints to serve data to the frontend:
   - Returns: Average metrics for "before" and "after" periods
   - Use case: Measure impact of tools, processes, or team changes
 
+#### Content Analytics (Categories)
+- **GET /api/categories** - Category statistics across all repositories
+  - Returns: Category name, total commits, unique authors, repositories, lines changed
+  - Sorted by: Total commits (descending)
+
+- **GET /api/categories/:repoName** - Category breakdown for specific repository
+  - Returns: Categories with commit counts and metrics for the repository
+
+- **GET /api/category-trends** - Monthly trends by category
+  - Query params: `months` (default: 12), `repo` (optional)
+  - Returns: Month, category, commits, authors, lines changed
+  - Shows how work is distributed across business domains over time
+
 ### Dashboard Views
 
 The frontend should provide these main views:
@@ -603,7 +832,7 @@ The frontend should provide these main views:
 **Key Components**:
 - Repository selector dropdown (or "All Repositories" for global view)
 - Area/line chart showing commit volume over last 12 months
-- Dual-line chart comparing lines added vs deleted
+- Line chart comparing lines changed vs added vs deleted
 - Summary cards showing averages (commits/month, lines/commit, contributors/month)
 
 **User Experience**:
@@ -680,6 +909,53 @@ The frontend should provide these main views:
 - Easy reconfiguration of time periods
 - Shareable results (export or URL parameters)
 
+#### 7. Content Analysis Page
+**Purpose**: Understand **what** business domains developers are working on
+
+**Key Components**:
+- Category breakdown (pie/donut chart showing distribution)
+  - BILLING, CS, INFRA, etc.
+  - Shows which business areas get most development attention
+- Category comparison (horizontal bar chart)
+  - Compare effort across all categories
+  - Easy identification of top/bottom categories
+- Trend charts over time
+  - How category distribution changes month-to-month
+  - Stacked area chart showing category evolution
+- Category by repository (matrix/heatmap)
+  - Which repos work on which categories
+  - Identify domain ownership patterns
+- Repository and date range filters
+
+**Insights Provided**:
+- Which business domains get most/least attention
+- Resource allocation across different work streams
+- Evolution of work focus over time
+- Domain ownership patterns across repositories
+- Neglected areas that may need attention
+
+**User Experience**:
+- Interactive charts with drill-down capability
+- Filter by repository, date range, and category
+- Export view for presentations/reports
+- Tooltip showing details on hover
+- Color-coding: Different color for each business domain
+- Percentage and absolute numbers displayed
+
+**Example Use Cases**:
+- "How much effort went into BILLING vs CS last quarter?"
+- "Are we neglecting infrastructure work?"
+- "Which categories need more resources?"
+- "How has our focus shifted after launching the new product?"
+- "Which repositories contribute to customer service improvements?"
+
+**Category Extraction Logic**:
+Categories are automatically extracted from commit subjects using:
+1. Pipe delimiter: `BILLING | Implemented feature` → BILLING
+2. Square brackets: `[CS] Fixed bug` → CS
+3. First uppercase word: `BILLING Implemented feature` → BILLING
+4. If no match: NULL (shown as "UNCATEGORIZED" in UI)
+
 ### Design Requirements
 
 **Visual Style**:
@@ -702,16 +978,6 @@ The frontend should provide these main views:
 - **Feedback**: Visual feedback for all interactions
 - **Consistency**: Consistent patterns across all views
 - **Accessibility**: Proper contrast, keyboard navigation, screen reader support
-
-### Database Connection
-
-The API should connect to the existing PostgreSQL database created by the data pipeline:
-- Use environment variables for credentials (PGHOST, PGDATABASE, PGUSER, PGPASSWORD)
-- Leverage existing views and materialized views:
-  - `mv_monthly_stats_by_repo` - Pre-computed monthly statistics
-  - `v_contributor_stats` - Aggregated contributor data
-  - `v_daily_stats_by_repo` - Daily activity aggregations
-  - `v_commit_details` - Detailed commit information with repository joins
 
 ### Deployment Considerations
 

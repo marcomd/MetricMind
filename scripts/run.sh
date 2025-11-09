@@ -366,6 +366,32 @@ while IFS= read -r repo_json; do
     echo ""
 done <<< "$REPOS"
 
+# Post-processing steps (only if data was loaded)
+if [ "$DO_LOAD" = true ] && [ $SUCCESS_COUNT -gt 0 ]; then
+    echo "================================================================="
+    echo -e "${BLUE}POST-PROCESSING${NC}"
+    echo "================================================================="
+    echo ""
+
+    # Step 1: Categorize commits
+    log_info "Step 1: Categorizing commits..."
+    if "$SCRIPT_DIR/categorize_commits.rb" ${SINGLE_REPO:+--repo "$SINGLE_REPO"}; then
+        log_success "Commits categorized"
+    else
+        log_warning "Categorization completed with warnings (this is normal if some commits couldn't be categorized)"
+    fi
+    echo ""
+
+    # Step 2: Refresh materialized views
+    log_info "Step 2: Refreshing materialized views..."
+    if psql -d "${PGDATABASE:-git_analytics}" -c "SELECT refresh_all_mv(); SELECT refresh_category_mv();" > /dev/null 2>&1; then
+        log_success "Materialized views refreshed"
+    else
+        log_warning "Failed to refresh materialized views (they may not exist yet)"
+    fi
+    echo ""
+fi
+
 # Final summary
 echo "================================================================="
 echo -e "${BLUE}FINAL SUMMARY${NC}"

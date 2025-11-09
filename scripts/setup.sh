@@ -1,6 +1,10 @@
 #!/bin/bash
-# Quick setup script for Git Productivity Analytics
-# Usage: ./scripts/setup.sh
+# Complete setup script for Git Productivity Analytics
+# Usage: ./scripts/setup.sh [OPTIONS]
+#
+# Options:
+#   --database-only    Only set up the database (skip dependencies and .env setup)
+#   -h, --help         Show this help message
 
 set -e
 
@@ -14,67 +18,126 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+# Flags
+DATABASE_ONLY=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --database-only)
+            DATABASE_ONLY=true
+            shift
+            ;;
+        -h|--help)
+            cat << EOF
+Git Productivity Analytics - Setup Script
+
+Usage:
+  ./scripts/setup.sh [OPTIONS]
+
+Options:
+  --database-only    Only set up the database (skip dependencies and .env setup)
+  -h, --help         Show this help message
+
+Examples:
+  # Full setup (recommended for first-time setup)
+  ./scripts/setup.sh
+
+  # Database-only setup (useful for recreating database)
+  ./scripts/setup.sh --database-only
+
+EOF
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Unknown option: $1${NC}"
+            echo "Run with --help for usage information"
+            exit 1
+            ;;
+    esac
+done
+
 echo -e "${BLUE}╔════════════════════════════════════════════╗${NC}"
 echo -e "${BLUE}║  Git Productivity Analytics Setup         ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════╝${NC}"
 echo ""
 
+if [ "$DATABASE_ONLY" = true ]; then
+    echo -e "${YELLOW}Running in database-only mode${NC}"
+    echo ""
+fi
+
 # Step 1: Check prerequisites
-echo -e "${BLUE}[1/6] Checking prerequisites...${NC}"
+if [ "$DATABASE_ONLY" = false ]; then
+    echo -e "${BLUE}[1/6] Checking prerequisites...${NC}"
 
-# Check Ruby
-if ! command -v ruby &> /dev/null; then
-    echo -e "${RED}✗ Ruby is not installed${NC}"
-    echo "  Please install Ruby >= 2.7"
-    exit 1
-fi
-echo -e "${GREEN}✓ Ruby $(ruby --version | cut -d' ' -f2)${NC}"
+    # Check Ruby
+    if ! command -v ruby &> /dev/null; then
+        echo -e "${RED}✗ Ruby is not installed${NC}"
+        echo "  Please install Ruby >= 3.3"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Ruby $(ruby --version | cut -d' ' -f2)${NC}"
 
-# Check PostgreSQL
-if ! command -v psql &> /dev/null; then
-    echo -e "${RED}✗ PostgreSQL is not installed${NC}"
-    echo "  Please install PostgreSQL >= 12"
-    exit 1
-fi
-echo -e "${GREEN}✓ PostgreSQL $(psql --version | cut -d' ' -f3)${NC}"
+    # Check PostgreSQL
+    if ! command -v psql &> /dev/null; then
+        echo -e "${RED}✗ PostgreSQL is not installed${NC}"
+        echo "  Please install PostgreSQL >= 12"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ PostgreSQL $(psql --version | cut -d' ' -f3)${NC}"
 
-# Check jq
-if ! command -v jq &> /dev/null; then
-    echo -e "${YELLOW}⚠ jq is not installed (needed for multi-repo orchestration)${NC}"
-    echo "  Install with: brew install jq"
-else
-    echo -e "${GREEN}✓ jq $(jq --version)${NC}"
-fi
-
-# Step 2: Install Ruby dependencies
-echo ""
-echo -e "${BLUE}[2/6] Installing Ruby dependencies...${NC}"
-cd "$PROJECT_DIR"
-
-if [ -f "Gemfile" ]; then
-    if command -v bundle &> /dev/null; then
-        bundle install
-        echo -e "${GREEN}✓ Dependencies installed${NC}"
+    # Check jq
+    if ! command -v jq &> /dev/null; then
+        echo -e "${YELLOW}⚠ jq is not installed (needed for multi-repo orchestration)${NC}"
+        echo "  Install with: brew install jq"
     else
-        echo -e "${YELLOW}⚠ Bundler not found, installing...${NC}"
-        gem install bundler
-        bundle install
-        echo -e "${GREEN}✓ Dependencies installed${NC}"
+        echo -e "${GREEN}✓ jq $(jq --version)${NC}"
     fi
 else
-    echo -e "${YELLOW}⚠ No Gemfile found, skipping${NC}"
+    # Database-only mode: just check PostgreSQL
+    echo -e "${BLUE}[1/3] Checking PostgreSQL...${NC}"
+    if ! command -v psql &> /dev/null; then
+        echo -e "${RED}✗ PostgreSQL is not installed${NC}"
+        echo "  Please install PostgreSQL >= 12"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ PostgreSQL $(psql --version | cut -d' ' -f3)${NC}"
 fi
 
-# Step 3: Create environment file
-echo ""
-echo -e "${BLUE}[3/6] Setting up environment configuration...${NC}"
+# Step 2: Install Ruby dependencies (skip in database-only mode)
+if [ "$DATABASE_ONLY" = false ]; then
+    echo ""
+    echo -e "${BLUE}[2/6] Installing Ruby dependencies...${NC}"
+    cd "$PROJECT_DIR"
 
-if [ ! -f "$PROJECT_DIR/.env" ]; then
-    cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
-    echo -e "${GREEN}✓ Created .env file${NC}"
-    echo -e "${YELLOW}  Please edit .env with your database credentials${NC}"
-else
-    echo -e "${YELLOW}⚠ .env already exists, skipping${NC}"
+    if [ -f "Gemfile" ]; then
+        if command -v bundle &> /dev/null; then
+            bundle install
+            echo -e "${GREEN}✓ Dependencies installed${NC}"
+        else
+            echo -e "${YELLOW}⚠ Bundler not found, installing...${NC}"
+            gem install bundler
+            bundle install
+            echo -e "${GREEN}✓ Dependencies installed${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠ No Gemfile found, skipping${NC}"
+    fi
+fi
+
+# Step 3: Create environment file (skip in database-only mode)
+if [ "$DATABASE_ONLY" = false ]; then
+    echo ""
+    echo -e "${BLUE}[3/6] Setting up environment configuration...${NC}"
+
+    if [ ! -f "$PROJECT_DIR/.env" ]; then
+        cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
+        echo -e "${GREEN}✓ Created .env file${NC}"
+        echo -e "${YELLOW}  Please edit .env with your database credentials${NC}"
+    else
+        echo -e "${YELLOW}⚠ .env already exists, skipping${NC}"
+    fi
 fi
 
 # Load environment
@@ -82,9 +145,13 @@ if [ -f "$PROJECT_DIR/.env" ]; then
     export $(grep -v '^#' "$PROJECT_DIR/.env" | xargs)
 fi
 
-# Step 4: Create databases (production and test)
+# Step 4/2: Create databases (production and test)
 echo ""
-echo -e "${BLUE}[4/6] Setting up databases...${NC}"
+if [ "$DATABASE_ONLY" = true ]; then
+    echo -e "${BLUE}[2/3] Setting up databases...${NC}"
+else
+    echo -e "${BLUE}[4/6] Setting up databases...${NC}"
+fi
 
 DB_NAME="${PGDATABASE:-git_analytics}"
 DB_TEST_NAME="${PGDATABASE_TEST:-${DB_NAME}_test}"
@@ -129,9 +196,13 @@ PROD_DB_CREATED=$?
 create_database "$DB_TEST_NAME" "Test"
 TEST_DB_CREATED=$?
 
-# Step 5: Initialize schema
+# Step 5/3: Initialize schema
 echo ""
-echo -e "${BLUE}[5/6] Initializing database schemas...${NC}"
+if [ "$DATABASE_ONLY" = true ]; then
+    echo -e "${BLUE}[3/3] Initializing database schemas...${NC}"
+else
+    echo -e "${BLUE}[5/6] Initializing database schemas...${NC}"
+fi
 
 # Initialize production database schema (if created or recreated)
 if [ $PROD_DB_CREATED -eq 0 ]; then
@@ -143,10 +214,34 @@ if [ $PROD_DB_CREATED -eq 0 ]; then
         exit 1
     fi
 
+    # Apply migrations
+    echo "  Applying migrations..."
+    MIGRATIONS_DIR="$PROJECT_DIR/schema/migrations"
+    if [ -d "$MIGRATIONS_DIR" ]; then
+        for migration in "$MIGRATIONS_DIR"/*.sql; do
+            if [ -f "$migration" ]; then
+                echo "    - Applying $(basename "$migration")..."
+                if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$migration" > /dev/null 2>&1; then
+                    echo -e "    ${GREEN}✓ $(basename "$migration")${NC}"
+                else
+                    echo -e "    ${RED}✗ Failed: $(basename "$migration")${NC}"
+                    exit 1
+                fi
+            fi
+        done
+    fi
+
     if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/postgres_views.sql" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Production views created${NC}"
+        echo -e "${GREEN}✓ Production standard views created${NC}"
     else
         echo -e "${RED}✗ Failed to create production views${NC}"
+        exit 1
+    fi
+
+    if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/category_views.sql" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Production category views created${NC}"
+    else
+        echo -e "${RED}✗ Failed to create category views${NC}"
         exit 1
     fi
 else
@@ -163,22 +258,45 @@ if [ $TEST_DB_CREATED -eq 0 ]; then
         exit 1
     fi
 
+    # Apply migrations to test database too
+    echo "  Applying migrations to test database..."
+    MIGRATIONS_DIR="$PROJECT_DIR/schema/migrations"
+    if [ -d "$MIGRATIONS_DIR" ]; then
+        for migration in "$MIGRATIONS_DIR"/*.sql; do
+            if [ -f "$migration" ]; then
+                if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_TEST_NAME" -f "$migration" > /dev/null 2>&1; then
+                    echo -e "    ${GREEN}✓ $(basename "$migration")${NC}"
+                else
+                    echo -e "    ${YELLOW}⚠ Warning: $(basename "$migration") failed on test DB${NC}"
+                fi
+            fi
+        done
+    fi
+
     if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_TEST_NAME" -f "$PROJECT_DIR/schema/postgres_views.sql" > /dev/null 2>&1; then
         echo -e "${GREEN}✓ Test views created${NC}"
     else
         echo -e "${RED}✗ Failed to create test views${NC}"
         exit 1
     fi
+
+    if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_TEST_NAME" -f "$PROJECT_DIR/schema/category_views.sql" > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ Test category views created${NC}"
+    else
+        echo -e "${YELLOW}⚠ Warning: Failed to create test category views${NC}"
+    fi
 else
     echo -e "${YELLOW}  Skipping test schema (database not recreated)${NC}"
 fi
 
-# Step 6: Create directories
-echo ""
-echo -e "${BLUE}[6/6] Creating data directories...${NC}"
+# Step 6: Create directories (skip in database-only mode)
+if [ "$DATABASE_ONLY" = false ]; then
+    echo ""
+    echo -e "${BLUE}[6/6] Creating data directories...${NC}"
 
-mkdir -p "$PROJECT_DIR/data/exports"
-echo -e "${GREEN}✓ Created data/exports/${NC}"
+    mkdir -p "$PROJECT_DIR/data/exports"
+    echo -e "${GREEN}✓ Created data/exports/${NC}"
+fi
 
 # Final instructions
 echo ""
@@ -186,23 +304,54 @@ echo -e "${GREEN}╔════════════════════
 echo -e "${GREEN}║  Setup Complete!                           ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
 echo ""
-echo "Next steps:"
+
+if [ "$DATABASE_ONLY" = true ]; then
+    # Database-only mode instructions
+    echo "Database setup complete!"
+    echo ""
+    echo "Next steps:"
+    echo ""
+    echo "1. Configure repositories to track:"
+    echo -e "   ${BLUE}vim config/repositories.json${NC}"
+    echo ""
+    echo "2. Extract and load data (with automatic categorization):"
+    echo -e "   ${BLUE}./scripts/run.sh${NC}"
+    echo ""
+    echo "3. Query the database:"
+    echo -e "   ${BLUE}psql -d $DB_NAME${NC}"
+else
+    # Full setup instructions
+    echo "Next steps:"
+    echo ""
+    echo "1. Edit environment configuration (if needed):"
+    echo -e "   ${BLUE}vim .env${NC}"
+    echo ""
+    echo "2. Configure repositories to track:"
+    echo -e "   ${BLUE}vim config/repositories.json${NC}"
+    echo ""
+    echo "3. Extract and load data (with automatic categorization):"
+    echo -e "   ${BLUE}./scripts/run.sh${NC}"
+    echo ""
+    echo "   This will:"
+    echo "   - Extract git data from all enabled repositories"
+    echo "   - Load data to database"
+    echo "   - Categorize commits (extract business domains)"
+    echo "   - Refresh materialized views"
+    echo ""
+    echo "4. Query the database:"
+    echo -e "   ${BLUE}psql -d $DB_NAME${NC}"
+fi
+
 echo ""
-echo "1. Edit configuration:"
-echo -e "   ${BLUE}vim config/repositories.json${NC}"
+echo "Useful commands:"
+echo -e "   ${BLUE}# Process single repository${NC}"
+echo -e "   ./scripts/run.sh mater"
 echo ""
-echo "2. Extract and load data:"
-echo -e "   ${BLUE}./scripts/run_extraction.sh${NC}"
+echo -e "   ${BLUE}# Custom date range${NC}"
+echo -e "   ./scripts/run.sh --from \"1 year ago\" --to \"now\""
 echo ""
-echo "3. Query the database:"
-echo -e "   ${BLUE}psql -d $DB_NAME${NC}"
+echo -e "   ${BLUE}# Check categorization coverage${NC}"
+echo -e "   psql -d $DB_NAME -c \"SELECT * FROM v_category_stats;\""
 echo ""
-echo "Examples:"
-echo -e "   ${BLUE}# Single repo extraction${NC}"
-echo -e "   ./scripts/git_extract_to_json.rb \"6 months ago\" \"now\" \"data/repo.json\""
-echo ""
-echo -e "   ${BLUE}# Load to database${NC}"
-echo -e "   ./scripts/load_json_to_db.rb \"data/repo.json\""
-echo ""
-echo "Documentation: See DASHBOARD_README.md"
+echo "Documentation: See README.md"
 echo ""
