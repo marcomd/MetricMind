@@ -165,7 +165,17 @@ This will:
 
 **Note:** This skips Ruby dependencies and .env setup. Use `./scripts/setup.sh` (without flags) for complete first-time setup.
 
-#### 3. Configure Repositories
+#### 3. Database Migration
+
+Manually Apply the Migration
+
+E.g. `psql -d git_analytics -f schema/migrations/002_add_users_and_oauth.sql`
+
+This will:
+- Create the users table, the indexes etc.
+- Keep all your existing data intact
+
+#### 4. Configure Repositories
 
 Edit `config/repositories.json` to add your repositories:
 
