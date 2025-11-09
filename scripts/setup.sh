@@ -79,13 +79,13 @@ if [ "$DATABASE_ONLY" = false ]; then
     fi
     echo -e "${GREEN}✓ Ruby $(ruby --version | cut -d' ' -f2)${NC}"
 
-    # Check PostgreSQL
+    # Check PostgreSQL client
     if ! command -v psql &> /dev/null; then
-        echo -e "${RED}✗ PostgreSQL is not installed${NC}"
-        echo "  Please install PostgreSQL >= 12"
+        echo -e "${RED}✗ psql client is not installed${NC}"
+        echo "  Please install PostgreSQL client >= 12"
         exit 1
     fi
-    echo -e "${GREEN}✓ PostgreSQL $(psql --version | cut -d' ' -f3)${NC}"
+    echo -e "${GREEN}✓ psql client $(psql --version | cut -d' ' -f3)${NC}"
 
     # Check jq
     if ! command -v jq &> /dev/null; then
@@ -95,14 +95,14 @@ if [ "$DATABASE_ONLY" = false ]; then
         echo -e "${GREEN}✓ jq $(jq --version)${NC}"
     fi
 else
-    # Database-only mode: just check PostgreSQL
-    echo -e "${BLUE}[1/3] Checking PostgreSQL...${NC}"
+    # Database-only mode: just check PostgreSQL client
+    echo -e "${BLUE}[1/3] Checking PostgreSQL client...${NC}"
     if ! command -v psql &> /dev/null; then
-        echo -e "${RED}✗ PostgreSQL is not installed${NC}"
-        echo "  Please install PostgreSQL >= 12"
+        echo -e "${RED}✗ psql client is not installed${NC}"
+        echo "  Please install PostgreSQL client >= 12"
         exit 1
     fi
-    echo -e "${GREEN}✓ PostgreSQL $(psql --version | cut -d' ' -f3)${NC}"
+    echo -e "${GREEN}✓ psql client $(psql --version | cut -d' ' -f3)${NC}"
 fi
 
 # Step 2: Install Ruby dependencies (skip in database-only mode)
@@ -145,6 +145,48 @@ if [ -f "$PROJECT_DIR/.env" ]; then
     export $(grep -v '^#' "$PROJECT_DIR/.env" | xargs)
 fi
 
+# Parse DATABASE_URL if present (takes priority over individual vars)
+if [ -n "$DATABASE_URL" ]; then
+    # Extract components from postgresql://user:password@host:port/database?params
+    # Remove protocol prefix
+    DB_URL_NO_PROTO="${DATABASE_URL#postgresql://}"
+
+    # Extract user and password (before @)
+    if [[ "$DB_URL_NO_PROTO" == *"@"* ]]; then
+        USER_PASS="${DB_URL_NO_PROTO%%@*}"
+        HOST_PORT_DB="${DB_URL_NO_PROTO#*@}"
+
+        # Split user:password
+        PGUSER="${USER_PASS%%:*}"
+        export PGUSER
+        PGPASSWORD="${USER_PASS#*:}"
+        export PGPASSWORD
+    else
+        HOST_PORT_DB="$DB_URL_NO_PROTO"
+    fi
+
+    # Extract host:port and database (before ?)
+    HOST_PORT_DB="${HOST_PORT_DB%%\?*}"
+
+    # Extract database name (after last /)
+    PGDATABASE="${HOST_PORT_DB##*/}"
+    export PGDATABASE
+
+    # Extract host:port (before database)
+    HOST_PORT="${HOST_PORT_DB%/*}"
+
+    # Extract host and port
+    PGHOST="${HOST_PORT%%:*}"
+    export PGHOST
+
+    if [[ "$HOST_PORT" == *":"* ]]; then
+        PGPORT="${HOST_PORT#*:}"
+        export PGPORT
+    fi
+
+    echo -e "${BLUE}ℹ Using DATABASE_URL from .env${NC}"
+fi
+
 # Step 4/2: Create databases (production and test)
 echo ""
 if [ "$DATABASE_ONLY" = true ]; then
@@ -162,6 +204,20 @@ echo "  Production DB: $DB_NAME"
 echo "  Test DB: $DB_TEST_NAME"
 echo "  Host: $DB_HOST"
 echo "  User: $DB_USER"
+
+# Check actual database version
+if [ -n "$DATABASE_URL" ]; then
+    echo ""
+    echo -n "  Checking database version... "
+    DB_VERSION=$(psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT version();" 2>/dev/null | cut -d'(' -f1)
+    if [ -n "$DB_VERSION" ]; then
+        echo -e "${GREEN}✓${NC}"
+        echo "  $DB_VERSION"
+    else
+        echo -e "${YELLOW}(unable to connect)${NC}"
+    fi
+fi
+echo ""
 
 # Function to create or recreate database
 create_database() {
@@ -188,13 +244,27 @@ create_database() {
     fi
 }
 
-# Create production database
-create_database "$DB_NAME" "Production"
-PROD_DB_CREATED=$?
+# Handle database creation differently for remote vs local databases
+if [ -n "$DATABASE_URL" ]; then
+    # Remote database (e.g., Neon) - database already exists, can't be recreated
+    echo ""
+    echo -e "${BLUE}ℹ Remote database detected - skipping database creation${NC}"
+    echo -e "${BLUE}  Database is managed by the service provider${NC}"
+    echo -e "${BLUE}  Will initialize/update schema on existing database${NC}"
 
-# Create test database
-create_database "$DB_TEST_NAME" "Test"
-TEST_DB_CREATED=$?
+    # Always initialize schema for remote database
+    PROD_DB_CREATED=0
+    TEST_DB_CREATED=1  # Don't create test DB on remote
+else
+    # Local database - allow creation/recreation
+    # Create production database
+    create_database "$DB_NAME" "Production"
+    PROD_DB_CREATED=$?
+
+    # Create test database
+    create_database "$DB_TEST_NAME" "Test"
+    TEST_DB_CREATED=$?
+fi
 
 # Step 5/3: Initialize schema
 echo ""
@@ -206,43 +276,75 @@ fi
 
 # Initialize production database schema (if created or recreated)
 if [ $PROD_DB_CREATED -eq 0 ]; then
-    echo "  Initializing production database schema..."
-    if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/postgres_schema.sql" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Production schema initialized${NC}"
-    else
-        echo -e "${RED}✗ Failed to initialize production schema${NC}"
-        exit 1
-    fi
+    # Check if schema already exists
+    TABLES_EXIST=$(psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('repositories', 'commits');" 2>/dev/null || echo "0")
 
-    # Apply migrations
-    echo "  Applying migrations..."
-    MIGRATIONS_DIR="$PROJECT_DIR/schema/migrations"
-    if [ -d "$MIGRATIONS_DIR" ]; then
-        for migration in "$MIGRATIONS_DIR"/*.sql; do
-            if [ -f "$migration" ]; then
-                echo "    - Applying $(basename "$migration")..."
-                if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$migration" > /dev/null 2>&1; then
-                    echo -e "    ${GREEN}✓ $(basename "$migration")${NC}"
-                else
-                    echo -e "    ${RED}✗ Failed: $(basename "$migration")${NC}"
-                    exit 1
+    if [ "$TABLES_EXIST" -eq "2" ]; then
+        echo -e "${BLUE}  Schema already exists, updating...${NC}"
+
+        # For existing schema, only apply migrations and refresh views
+        echo "  Applying migrations..."
+        MIGRATIONS_DIR="$PROJECT_DIR/schema/migrations"
+        if [ -d "$MIGRATIONS_DIR" ]; then
+            for migration in "$MIGRATIONS_DIR"/*.sql; do
+                if [ -f "$migration" ]; then
+                    echo "    - Applying $(basename "$migration")..."
+                    # Apply migration, ignoring errors for already-applied migrations
+                    psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$migration" > /dev/null 2>&1 && \
+                        echo -e "    ${GREEN}✓ $(basename "$migration")${NC}" || \
+                        echo -e "    ${YELLOW}○ $(basename "$migration") (already applied or skipped)${NC}"
                 fi
-            fi
-        done
-    fi
+            done
+        fi
 
-    if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/postgres_views.sql" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Production standard views created${NC}"
-    else
-        echo -e "${RED}✗ Failed to create production views${NC}"
-        exit 1
-    fi
+        # Recreate views (they can be safely recreated)
+        echo "  Recreating views..."
+        psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/postgres_views.sql" > /dev/null 2>&1 && \
+            echo -e "${GREEN}✓ Standard views updated${NC}" || \
+            echo -e "${YELLOW}⚠ Warning: Some views may have failed${NC}"
 
-    if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/category_views.sql" > /dev/null 2>&1; then
-        echo -e "${GREEN}✓ Production category views created${NC}"
+        psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/category_views.sql" > /dev/null 2>&1 && \
+            echo -e "${GREEN}✓ Category views updated${NC}" || \
+            echo -e "${YELLOW}⚠ Warning: Some category views may have failed${NC}"
     else
-        echo -e "${RED}✗ Failed to create category views${NC}"
-        exit 1
+        echo "  Initializing production database schema..."
+        if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/postgres_schema.sql" > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ Production schema initialized${NC}"
+        else
+            echo -e "${RED}✗ Failed to initialize production schema${NC}"
+            exit 1
+        fi
+
+        # Apply migrations
+        echo "  Applying migrations..."
+        MIGRATIONS_DIR="$PROJECT_DIR/schema/migrations"
+        if [ -d "$MIGRATIONS_DIR" ]; then
+            for migration in "$MIGRATIONS_DIR"/*.sql; do
+                if [ -f "$migration" ]; then
+                    echo "    - Applying $(basename "$migration")..."
+                    if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$migration" > /dev/null 2>&1; then
+                        echo -e "    ${GREEN}✓ $(basename "$migration")${NC}"
+                    else
+                        echo -e "    ${RED}✗ Failed: $(basename "$migration")${NC}"
+                        exit 1
+                    fi
+                fi
+            done
+        fi
+
+        if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/postgres_views.sql" > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ Production standard views created${NC}"
+        else
+            echo -e "${RED}✗ Failed to create production views${NC}"
+            exit 1
+        fi
+
+        if psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" -f "$PROJECT_DIR/schema/category_views.sql" > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ Production category views created${NC}"
+        else
+            echo -e "${RED}✗ Failed to create category views${NC}"
+            exit 1
+        fi
     fi
 else
     echo -e "${YELLOW}  Skipping production schema (database not recreated)${NC}"

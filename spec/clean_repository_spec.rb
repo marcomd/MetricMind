@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'pg'
 require 'tmpdir'
 require 'json'
+require 'open3'
 
 RSpec.describe 'Repository Cleanup', :db_integration do
   let(:temp_dir) { Dir.mktmpdir }
@@ -84,6 +85,17 @@ RSpec.describe 'Repository Cleanup', :db_integration do
     end
   end
 
+  # Helper to build test environment for subprocess
+  def test_env
+    {
+      'RSPEC_RUNNING' => 'true',
+      'PGDATABASE' => ENV['PGDATABASE'],
+      'PGHOST' => ENV['PGHOST'] || 'localhost',
+      'PGPORT' => ENV['PGPORT'] || '5432',
+      'PGUSER' => ENV['PGUSER'] || ENV['USER']
+    }.compact
+  end
+
   describe 'clean_repository.rb' do
     let(:script_path) { File.join(File.dirname(__dir__), 'scripts', 'clean_repository.rb') }
 
@@ -98,7 +110,7 @@ RSpec.describe 'Repository Cleanup', :db_integration do
     end
 
     it 'requires repository name argument' do
-      output, status = Open3.capture2('ruby', script_path, :err => [:child, :out])
+      output, status = Open3.capture2(test_env, 'ruby', script_path, :err => [:child, :out])
 
       expect(status.success?).to be false
       expect(output).to include('Repository name is required')
@@ -113,7 +125,7 @@ RSpec.describe 'Repository Cleanup', :db_integration do
       expect(repo2_commits).to eq(2)
 
       # Clean repo1 with --force to skip confirmation
-      output, status = Open3.capture2('ruby', script_path, 'test-repo-1', '--force')
+      output, status = Open3.capture2(test_env, 'ruby', script_path, 'test-repo-1', '--force')
 
       expect(status.success?).to be true
       expect(output).to include('CLEANUP COMPLETE')
@@ -137,7 +149,7 @@ RSpec.describe 'Repository Cleanup', :db_integration do
       expect(initial_commits).to eq(3)
 
       # Run dry-run
-      output, status = Open3.capture2('ruby', script_path, 'test-repo-1', '--dry-run')
+      output, status = Open3.capture2(test_env, 'ruby', script_path, 'test-repo-1', '--dry-run')
 
       expect(status.success?).to be true
       expect(output).to include('DRY RUN MODE')
@@ -149,7 +161,7 @@ RSpec.describe 'Repository Cleanup', :db_integration do
     end
 
     it 'deletes repository record with --delete-repo flag' do
-      output, status = Open3.capture2('ruby', script_path, 'test-repo-1', '--force', '--delete-repo')
+      output, status = Open3.capture2(test_env, 'ruby', script_path, 'test-repo-1', '--force', '--delete-repo')
 
       expect(status.success?).to be true
 
@@ -159,7 +171,7 @@ RSpec.describe 'Repository Cleanup', :db_integration do
     end
 
     it 'reports error for non-existent repository' do
-      output, status = Open3.capture2('ruby', script_path, 'non-existent-repo', '--force', :err => [:child, :out])
+      output, status = Open3.capture2(test_env, 'ruby', script_path, 'non-existent-repo', '--force', :err => [:child, :out])
 
       expect(status.success?).to be true
       expect(output).to include("Repository 'non-existent-repo' not found")
@@ -172,7 +184,7 @@ RSpec.describe 'Repository Cleanup', :db_integration do
       expect(initial_time).not_to be_nil
 
       # Clean repository
-      Open3.capture2('ruby', script_path, 'test-repo-1', '--force')
+      Open3.capture2(test_env, 'ruby', script_path, 'test-repo-1', '--force')
 
       # Verify last_extracted_at is NULL
       updated_time = conn.exec('SELECT last_extracted_at FROM repositories WHERE name = $1', ['test-repo-1'])[0]['last_extracted_at']
@@ -183,7 +195,7 @@ RSpec.describe 'Repository Cleanup', :db_integration do
   describe 'Data integrity after cleanup' do
     it 'maintains foreign key constraints' do
       # Clean repo1
-      Open3.capture2('ruby', 'scripts/clean_repository.rb', 'test-repo-1', '--force')
+      Open3.capture2(test_env, 'ruby', 'scripts/clean_repository.rb', 'test-repo-1', '--force')
 
       # Verify no orphaned commits
       orphaned_commits = conn.exec(
@@ -195,7 +207,7 @@ RSpec.describe 'Repository Cleanup', :db_integration do
 
     it 'allows re-insertion after cleanup' do
       # Clean repo1
-      Open3.capture2('ruby', 'scripts/clean_repository.rb', 'test-repo-1', '--force')
+      Open3.capture2(test_env, 'ruby', 'scripts/clean_repository.rb', 'test-repo-1', '--force')
 
       # Re-insert commits
       repo_id = conn.exec('SELECT id FROM repositories WHERE name = $1', ['test-repo-1'])[0]['id']

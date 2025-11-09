@@ -10,8 +10,10 @@
 # 3. Updates the commits table with category data
 
 require 'bundler/setup'
+require 'dotenv/load' unless ENV['RSPEC_RUNNING']
 require 'pg'
 require 'optparse'
+require_relative '../lib/db_connection'
 
 class CommitCategorizer
   def initialize(options = {})
@@ -26,13 +28,7 @@ class CommitCategorizer
   end
 
   def connect_to_db
-    PG.connect(
-      host: ENV['PGHOST'] || 'localhost',
-      port: ENV['PGPORT'] || 5432,
-      dbname: ENV['PGDATABASE'] || 'git_analytics',
-      user: ENV['PGUSER'],
-      password: ENV['PGPASSWORD']
-    )
+    PG.connect(DBConnection.connection_params)
   rescue PG::Error => e
     abort "Error connecting to database: #{e.message}"
   end

@@ -2,8 +2,10 @@
 # frozen_string_literal: true
 
 require 'bundler/setup'
+require 'dotenv/load' unless ENV['RSPEC_RUNNING']
 require 'pg'
 require 'optparse'
+require_relative '../lib/db_connection'
 
 # Repository data cleaner for PostgreSQL
 # Usage: ./scripts/clean_repository.rb REPO_NAME [OPTIONS]
@@ -46,13 +48,7 @@ class RepositoryCleaner
   end
 
   def connect_to_database
-    db_config = {
-      host: ENV['PGHOST'] || 'localhost',
-      port: ENV['PGPORT'] || 5432,
-      dbname: ENV['PGDATABASE'] || 'git_analytics',
-      user: ENV['PGUSER'] || ENV['USER'],
-      password: ENV['PGPASSWORD']
-    }
+    db_config = DBConnection.connection_params
 
     puts "Connecting to database..."
     puts "  Host: #{db_config[:host]}"
@@ -262,11 +258,13 @@ if __FILE__ == $PROGRAM_NAME
       puts "  #{$PROGRAM_NAME} mater --force"
       puts ""
       puts "Environment Variables:"
-      puts "  PGHOST       PostgreSQL host (default: localhost)"
-      puts "  PGPORT       PostgreSQL port (default: 5432)"
-      puts "  PGDATABASE   Database name (default: git_analytics)"
-      puts "  PGUSER       Database user (default: current user)"
-      puts "  PGPASSWORD   Database password"
+      puts "  DATABASE_URL   PostgreSQL connection URL (takes priority if set)"
+      puts "                 Format: postgresql://user:pass@host:port/dbname?sslmode=require"
+      puts "  PGHOST         PostgreSQL host (default: localhost)"
+      puts "  PGPORT         PostgreSQL port (default: 5432)"
+      puts "  PGDATABASE     Database name (default: git_analytics)"
+      puts "  PGUSER         Database user (default: current user)"
+      puts "  PGPASSWORD     Database password"
       puts ""
       exit
     end

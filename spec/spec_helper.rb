@@ -4,7 +4,14 @@ require 'json'
 require 'tempfile'
 require 'fileutils'
 
-# Configure test database - use PGDATABASE_TEST if set, otherwise append _test
+# Configure test database
+# Set an environment variable to prevent dotenv from loading during tests
+ENV['RSPEC_RUNNING'] = 'true'
+
+# Clear DATABASE_URL so tests use local database with individual env vars
+ENV.delete('DATABASE_URL')
+
+# Set test database name
 if ENV['PGDATABASE_TEST']
   ENV['PGDATABASE'] = ENV['PGDATABASE_TEST']
 elsif ENV['PGDATABASE'] && !ENV['PGDATABASE'].end_with?('_test')

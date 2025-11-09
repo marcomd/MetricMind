@@ -162,6 +162,46 @@ if [ -f "$PROJECT_DIR/.env" ]; then
     export $(grep -v '^#' "$PROJECT_DIR/.env" | xargs)
 fi
 
+# Parse DATABASE_URL if present (takes priority over individual vars)
+if [ -n "$DATABASE_URL" ]; then
+    # Extract components from postgresql://user:password@host:port/database?params
+    # Remove protocol prefix
+    DB_URL_NO_PROTO="${DATABASE_URL#postgresql://}"
+
+    # Extract user and password (before @)
+    if [[ "$DB_URL_NO_PROTO" == *"@"* ]]; then
+        USER_PASS="${DB_URL_NO_PROTO%%@*}"
+        HOST_PORT_DB="${DB_URL_NO_PROTO#*@}"
+
+        # Split user:password
+        PGUSER="${USER_PASS%%:*}"
+        export PGUSER
+        PGPASSWORD="${USER_PASS#*:}"
+        export PGPASSWORD
+    else
+        HOST_PORT_DB="$DB_URL_NO_PROTO"
+    fi
+
+    # Extract host:port and database (before ?)
+    HOST_PORT_DB="${HOST_PORT_DB%%\?*}"
+
+    # Extract database name (after last /)
+    PGDATABASE="${HOST_PORT_DB##*/}"
+    export PGDATABASE
+
+    # Extract host:port (before database)
+    HOST_PORT="${HOST_PORT_DB%/*}"
+
+    # Extract host and port
+    PGHOST="${HOST_PORT%%:*}"
+    export PGHOST
+
+    if [[ "$HOST_PORT" == *":"* ]]; then
+        PGPORT="${HOST_PORT#*:}"
+        export PGPORT
+    fi
+fi
+
 # Check if config file exists
 if [ ! -f "$CONFIG_FILE" ]; then
     log_error "Configuration file not found: $CONFIG_FILE"

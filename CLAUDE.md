@@ -190,11 +190,18 @@ bundle exec rubocop -a
 
 **`.env`** - Database credentials:
 ```bash
+# Option 1: Use DATABASE_URL (recommended for remote databases)
+# DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require
+
+# Option 2: Use individual parameters (local development)
 PGHOST=localhost
 PGPORT=5432
 PGDATABASE=git_analytics
 PGUSER=username
 PGPASSWORD=password
+
+# Note: DATABASE_URL takes priority over individual parameters if both are set
+
 PGDATABASE_TEST=git_analytics_test
 DEFAULT_FROM_DATE="6 months ago"
 DEFAULT_TO_DATE="now"
@@ -245,10 +252,19 @@ OUTPUT_DIR=./data/exports
 
 ## Environment Variables
 
+**Database Connection Priority:**
+- `DATABASE_URL` - PostgreSQL connection string (takes priority if set)
+  - Format: `postgresql://user:password@host:port/database?sslmode=require`
+  - Recommended for remote/hosted databases (Neon, Heroku, etc.)
+- Individual parameters (used if `DATABASE_URL` not set):
+  - `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`
+  - Recommended for local development
+
+**Test Database:**
 Test database is automatically configured:
 - `PGDATABASE_TEST` used if set, otherwise `PGDATABASE` + `_test` suffix
 - Tests modify `ENV['PGDATABASE']` to point to test database
-- Production scripts use `ENV['PGDATABASE']` directly
+- Production scripts use `ENV['PGDATABASE']` directly or parse from `DATABASE_URL`
 
 ## Future Development (Dashboard)
 

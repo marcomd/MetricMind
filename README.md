@@ -503,11 +503,17 @@ Configure via `.env` file or environment:
 
 ```bash
 # Database connection
+# Option 1: Use DATABASE_URL (recommended for remote/hosted databases like Neon, Heroku, etc.)
+# DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require
+
+# Option 2: Use individual connection parameters (local development)
 PGHOST=localhost
 PGPORT=5432
 PGDATABASE=git_analytics
 PGUSER=your_username
 PGPASSWORD=your_password
+
+# Note: DATABASE_URL takes priority over individual parameters if both are set
 
 # PostgreSQL Test Database Configuration
 PGDATABASE_TEST=git_analytics_test
@@ -539,9 +545,26 @@ OUTPUT_DIR=./data/exports
 
 ### Production (Cloud)
 
-1. **Database**: Use managed PostgreSQL (AWS RDS, Google Cloud SQL, Heroku Postgres)
+1. **Database**: Use managed PostgreSQL (AWS RDS, Google Cloud SQL, Heroku Postgres, Neon)
 2. **Extraction**: Run as scheduled job (cron, GitHub Actions, Cloud Scheduler)
 3. **Dashboard**: Deploy to Vercel, Netlify, or keep on Replit
+
+#### Using Remote PostgreSQL (e.g., Neon)
+
+For cloud-hosted PostgreSQL services, use the `DATABASE_URL` environment variable:
+
+```bash
+# In your .env file or CI/CD environment
+DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require
+```
+
+This is the recommended approach for services like:
+- **Neon** - Serverless PostgreSQL
+- **Heroku Postgres** - Managed PostgreSQL on Heroku
+- **Supabase** - Open source Firebase alternative
+- **Railway** - Modern deployment platform
+
+The connection string includes SSL configuration which is typically required by hosted services.
 
 Example GitHub Actions workflow:
 
