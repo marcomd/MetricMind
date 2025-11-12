@@ -9,8 +9,12 @@ require 'time'
 require_relative '../lib/db_connection'
 
 # JSON data loader for PostgreSQL
+# Loads extracted Git commit data from JSON files into the PostgreSQL database
 # Usage: ./scripts/load_json_to_db.rb JSON_FILE [DB_CONFIG]
 class DataLoader
+  # Initializes a new DataLoader instance
+  # @param json_file [String] path to the JSON file containing commit data
+  # @param db_config [Hash, nil] optional database configuration (uses default if nil)
   def initialize(json_file, db_config = nil)
     @json_file = File.expand_path(json_file)
     @db_config = db_config || default_db_config
@@ -24,6 +28,10 @@ class DataLoader
     }
   end
 
+  # Executes the full data loading workflow
+  # Validates JSON, connects to database, loads data in transaction, and prints summary
+  # @return [void]
+  # @raise [StandardError] if validation fails or database errors occur
   def run
     validate_json_file!
     load_json_data
@@ -43,16 +51,25 @@ class DataLoader
 
   private
 
+  # Returns the default database configuration from environment variables
+  # @return [Hash] database connection parameters (host, port, dbname, user, password)
   def default_db_config
     DBConnection.connection_params
   end
 
+  # Validates that the JSON file exists
+  # @return [void]
+  # @raise [SystemExit] if the JSON file does not exist
   def validate_json_file!
     unless File.exist?(@json_file)
       abort "Error: JSON file not found: #{@json_file}"
     end
   end
 
+  # Loads and parses the JSON data file
+  # Validates that required keys (repository, commits) are present
+  # @return [void]
+  # @raise [SystemExit] if JSON is invalid or missing required keys
   def load_json_data
     puts "Loading JSON data from #{@json_file}..."
     @data = JSON.parse(File.read(@json_file))
@@ -67,6 +84,9 @@ class DataLoader
     abort "Error: Invalid JSON file: #{e.message}"
   end
 
+  # Establishes a connection to the PostgreSQL database
+  # @return [void]
+  # @raise [SystemExit] if connection fails
   def connect_to_database
     puts "Connecting to database..."
     puts "  Host: #{@db_config[:host]}"
@@ -82,6 +102,8 @@ class DataLoader
           "  DATABASE_URL (or individual: PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)"
   end
 
+  # Closes the database connection
+  # @return [void]
   def disconnect_from_database
     return unless @conn
 
@@ -89,15 +111,21 @@ class DataLoader
     puts "✓ Database connection closed"
   end
 
+  # Begins a database transaction
+  # @return [void]
   def begin_transaction
     @conn.exec('BEGIN')
   end
 
+  # Commits the current database transaction
+  # @return [void]
   def commit_transaction
     @conn.exec('COMMIT')
     puts "✓ Transaction committed"
   end
 
+  # Rolls back the current database transaction
+  # @return [void]
   def rollback_transaction
     return unless @conn
 
@@ -105,6 +133,10 @@ class DataLoader
     puts "✗ Transaction rolled back due to error"
   end
 
+  # Loads or updates repository metadata in the database
+  # Creates a new repository record if it doesn't exist, or updates the existing one
+  # Sets the @repo_id instance variable for use in loading commits
+  # @return [void]
   def load_repository
     puts "\nLoading repository: #{@data['repository']}..."
 
@@ -139,6 +171,10 @@ class DataLoader
     end
   end
 
+  # Loads all commits from the JSON data into the database
+  # Processes commits in batches and handles duplicates with ON CONFLICT
+  # Updates statistics for inserted, skipped, and errored commits
+  # @return [void]
   def load_commits
     commits = @data['commits']
     puts "\nLoading #{commits.length} commits..."
@@ -149,8 +185,8 @@ class DataLoader
     insert_stmt = @conn.prepare('insert_commit', <<~SQL)
       INSERT INTO commits (
         repository_id, hash, commit_date, author_name, author_email,
-        subject, lines_added, lines_deleted, files_changed
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        subject, lines_added, lines_deleted, files_changed, weight, ai_tools
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ON CONFLICT (repository_id, hash) DO NOTHING
       RETURNING id
     SQL
@@ -171,7 +207,9 @@ class DataLoader
               commit['subject'],
               commit['lines_added'],
               commit['lines_deleted'],
-              commit['files_changed']
+              commit['files_changed'],
+              commit['weight'] || 100,
+              commit['ai_tools']
             ]
           )
 
@@ -195,6 +233,9 @@ class DataLoader
     puts "\n  ✓ Commits loaded"
   end
 
+  # Refreshes materialized views to include newly loaded data
+  # Currently refreshes mv_monthly_stats_by_repo
+  # @return [void]
   def refresh_materialized_views
     puts "\nRefreshing materialized views..."
 
@@ -207,6 +248,9 @@ class DataLoader
     end
   end
 
+  # Prints a summary of the data loading results
+  # Displays repository info, date range, and statistics on loaded commits
+  # @return [void]
   def print_summary
     puts "\n" + "=" * 50
     puts "Data Load Summary"
@@ -225,6 +269,8 @@ class DataLoader
     puts "=" * 50
   end
 
+  # Retrieves the total number of commits in the database for the current repository
+  # @return [String] the commit count as a string, or 'unknown' if query fails
   def get_total_commits
     result = @conn.exec_params(
       'SELECT COUNT(*) FROM commits WHERE repository_id = $1',

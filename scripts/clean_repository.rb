@@ -8,8 +8,15 @@ require 'optparse'
 require_relative '../lib/db_connection'
 
 # Repository data cleaner for PostgreSQL
+# Deletes all commits for a specific repository and optionally the repository record itself
 # Usage: ./scripts/clean_repository.rb REPO_NAME [OPTIONS]
 class RepositoryCleaner
+  # Initializes a new RepositoryCleaner instance
+  # @param repo_name [String] the name of the repository to clean
+  # @param options [Hash] configuration options
+  # @option options [Boolean] :dry_run if true, no database changes will be made (default: false)
+  # @option options [Boolean] :force if true, skip confirmation prompt (default: false)
+  # @option options [Boolean] :delete_repo if true, also delete the repository record (default: false)
   def initialize(repo_name, options = {})
     @repo_name = repo_name
     @dry_run = options[:dry_run]
@@ -18,6 +25,9 @@ class RepositoryCleaner
     @conn = nil
   end
 
+  # Executes the full cleanup workflow
+  # Validates repository name, connects to database, shows summary, confirms, and deletes data
+  # @return [void]
   def run
     validate_repo_name!
     connect_to_database
@@ -41,12 +51,19 @@ class RepositoryCleaner
 
   private
 
+  # Validates that the repository name is not nil or empty
+  # @return [void]
+  # @raise [SystemExit] if repository name is nil or empty
   def validate_repo_name!
     if @repo_name.nil? || @repo_name.strip.empty?
       abort "Error: Repository name is required"
     end
   end
 
+  # Establishes a connection to the PostgreSQL database
+  # Displays connection info and warns if not using test database
+  # @return [void]
+  # @raise [SystemExit] if connection fails
   def connect_to_database
     db_config = DBConnection.connection_params
 
@@ -70,12 +87,17 @@ class RepositoryCleaner
     abort "Error connecting to database: #{e.message}"
   end
 
+  # Closes the database connection
+  # @return [void]
   def disconnect_from_database
     return unless @conn
 
     @conn.close
   end
 
+  # Finds the repository in the database by name
+  # Lists available repositories if not found
+  # @return [Integer, nil] the repository ID, or nil if not found
   def find_repository
     result = @conn.exec_params(
       'SELECT id, name, url FROM repositories WHERE name = $1',
@@ -94,6 +116,10 @@ class RepositoryCleaner
     result[0]['id'].to_i
   end
 
+  # Displays a summary of what will be deleted
+  # Shows repository details, commit count, and deletion scope
+  # @param repo_id [Integer] the repository database ID
+  # @return [void]
   def show_deletion_summary(repo_id)
     # Get commit count
     commit_result = @conn.exec_params(
@@ -136,6 +162,9 @@ class RepositoryCleaner
     end
   end
 
+  # Prompts the user to confirm deletion
+  # Requires typing 'yes' to proceed
+  # @return [Boolean] true if user confirmed, false otherwise
   def confirm_deletion
     print "Are you sure you want to delete this data? (type 'yes' to confirm): "
     $stdout.flush  # Ensure prompt is displayed
@@ -160,6 +189,11 @@ class RepositoryCleaner
     true
   end
 
+  # Deletes the commits and optionally the repository record from the database
+  # Wraps operations in a transaction for atomicity
+  # @param repo_id [Integer] the repository database ID
+  # @return [void]
+  # @raise [SystemExit] if deletion fails
   def delete_data(repo_id)
     puts "Deleting data..."
     puts ""
@@ -197,6 +231,9 @@ class RepositoryCleaner
     abort "Error deleting data: #{e.message}"
   end
 
+  # Prints the final summary after successful cleanup
+  # Displays confirmation message and suggested next steps
+  # @return [void]
   def print_final_summary
     puts "=" * 60
     puts "✅ CLEANUP COMPLETE"

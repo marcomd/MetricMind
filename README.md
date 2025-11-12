@@ -72,15 +72,17 @@ vim config/repositories.json    # Add your repositories
 psql -d git_analytics -c "SELECT * FROM v_category_stats;"
 ```
 
-That's it! The system automatically handles schema setup, migrations, data extraction, commit categorization, and view optimization.
+That's it! The system automatically handles schema setup, migrations, data extraction, commit categorization, weight calculation, and view optimization.
 
 **What happens automatically:**
 - ✅ Database creation and schema initialization
-- ✅ Migration application (category column)
-- ✅ View creation (standard + category analytics)
-- ✅ Git data extraction from all repositories
+- ✅ Migration application (weight, ai_tools, category columns)
+- ✅ View creation (standard + category + AI tools analytics)
+- ✅ Git data extraction from all repositories (with full commit messages)
+- ✅ AI tools extraction from commit bodies
 - ✅ Commit categorization (business domain extraction)
-- ✅ Materialized view refresh (optimized queries)
+- ✅ Weight calculation (revert detection for accurate metrics)
+- ✅ Materialized view refresh (weighted and unweighted metrics)
 
 The setup procedure supports two modes:
 
@@ -217,20 +219,27 @@ Edit `config/repositories.json` to add your repositories:
 ```
 
 The `run.sh` script automatically:
-- Extracts git data from repositories
+- Extracts git data from repositories (including full commit messages)
+- Extracts AI tools information from commit bodies
 - Loads data into the database
 - **Categorizes commits** (extracts business domains from commit messages)
-- **Refreshes materialized views** (for fast dashboard queries)
+- **Calculates commit weights** (detects and marks reverted commits)
+- **Refreshes materialized views** (for fast dashboard queries with weighted metrics)
 
 No additional steps needed - everything runs automatically!
 
 **What's included:**
 - ✅ Git data extraction from all configured repositories
+- ✅ AI tools tracking (extracts tools like Claude Code, Cursor, GitHub Copilot from commit bodies)
 - ✅ Database loading with duplicate prevention
 - ✅ **Automatic commit categorization** (extracts business domains like BILLING, CS, INFRA from commit messages)
-- ✅ **Materialized view refresh** (ensures dashboard queries are fast)
+- ✅ **Weight calculation** (detects revert/unrevert patterns and adjusts commit weights for accurate productivity metrics)
+- ✅ **Materialized view refresh** (ensures dashboard queries are fast, includes both weighted and unweighted metrics)
 
-See [Commit Categorization](#commit-categorization) section for details on how categories are extracted.
+See sections below for details on:
+- [Commit Categorization](#commit-categorization)
+- [Weight Calculation (Revert Detection)](#weight-calculation-revert-detection)
+- [AI Tools Tracking](#ai-tools-tracking)
 
 ## Usage
 
@@ -744,6 +753,181 @@ If you need to manually refresh views (e.g., after manual database updates):
 # Refresh materialized views
 psql -d git_analytics -c "SELECT refresh_category_mv();"
 ```
+
+## Weight Calculation (Revert Detection)
+
+The weight calculation feature tracks commit validity by detecting reverted commits, enabling **accurate productivity metrics** that exclude work that was later reverted.
+
+### Overview
+
+Commits have a `weight` field (0-100) that reflects their validity:
+- **weight = 100**: Valid commit (default)
+- **weight = 0**: Reverted commit (excluded from weighted metrics)
+
+This allows analytics to distinguish between:
+- **Total metrics**: All commits, including reverted ones
+- **Weighted metrics**: Only valid work (reverted commits weighted at 0)
+
+**Note:** Weight calculation runs **automatically** as part of `./scripts/run.sh`. No manual intervention needed!
+
+### How It Works
+
+The system detects revert patterns in commit subjects and automatically adjusts weights:
+
+**Example workflow:**
+```
+1. CS | Move HTML content (!10463)              → weight = 100 (valid)
+2. Revert "CS | Move HTML content (!10463)"     → weight = 0 (revert)
+   ↳ Also sets commit #1 to weight = 0
+3. Unrevert !10463 and fix error (!10660)       → weight = 100 (restored)
+   ↳ Restores commit #1 to weight = 100
+```
+
+**Detection logic:**
+- **"Revert" keyword**: Identifies revert commits
+- **PR/MR numbers**: Links reverts to original commits via `(!12345)` or `(#12345)`
+- **"Unrevert" keyword**: Restores weight to valid commits
+
+### Manual Usage (Optional)
+
+Weight calculation runs automatically with `./scripts/run.sh`, but you can also run it manually:
+
+```bash
+# Calculate weights for all commits
+./scripts/calculate_commit_weights.rb
+
+# Preview changes without applying (dry-run)
+./scripts/calculate_commit_weights.rb --dry-run
+
+# Calculate weights for specific repository only
+./scripts/calculate_commit_weights.rb --repo mater
+```
+
+### Querying Weighted Metrics
+
+All analytics views include both weighted and unweighted metrics:
+
+```sql
+-- Compare unweighted vs weighted lines changed
+SELECT
+  repository_name,
+  year_month,
+  total_lines_changed,           -- All commits
+  weighted_lines_changed         -- Excluding reverted work
+FROM mv_monthly_stats_by_repo
+WHERE repository_name = 'MyApp'
+ORDER BY year_month DESC;
+
+-- Find all reverted commits
+SELECT * FROM v_reverted_commits
+ORDER BY commit_date DESC
+LIMIT 20;
+
+-- Calculate revert rate
+SELECT
+  COUNT(CASE WHEN weight = 0 THEN 1 END) as reverted,
+  COUNT(*) as total,
+  ROUND(COUNT(CASE WHEN weight = 0 THEN 1 END)::numeric / COUNT(*) * 100, 1) as revert_pct
+FROM commits;
+```
+
+### Benefits
+
+- **Accurate productivity metrics**: Exclude reverted work from calculations
+- **Quality insights**: Track revert rates to measure code quality
+- **Before/after analysis**: Compare weighted vs unweighted metrics to assess tool impact
+- **Team health**: High revert rates may indicate rushed work or insufficient testing
+
+## AI Tools Tracking
+
+The AI tools tracking feature automatically extracts information about AI development tools used for each commit, enabling **direct measurement of AI tool impact on productivity**.
+
+### Overview
+
+Commits can include AI tool information in their message body:
+- Extracted automatically during git data extraction
+- Stored in the `ai_tools` field (VARCHAR, nullable)
+- Normalized to uppercase for consistency (e.g., "CLAUDE CODE", "CURSOR", "GITHUB COPILOT")
+
+**Note:** AI tools are extracted **automatically** during data extraction. Simply include tool information in commit messages!
+
+### Commit Message Format
+
+To track AI tool usage, include this format in your commit message **body** (not subject):
+
+```
+Your commit subject here
+
+**AI tool: Claude Code**
+
+Rest of commit description...
+```
+
+**Supported formats:**
+- `**AI tool: Claude Code**`
+- `**AI tools: Claude Code and Copilot**`
+- `**AI tool: Cursor and GitHub Copilot**`
+- `AI tool: Claude Code` (without asterisks)
+- Case-insensitive
+
+**Supported tools** (automatically normalized):
+- Claude Code
+- Claude
+- Cursor
+- GitHub Copilot / Copilot
+- Any custom tool name (will be uppercased)
+
+### Querying AI Tools Data
+
+Use the AI tools views for analysis:
+
+```sql
+-- Overall AI tools usage statistics
+SELECT * FROM v_ai_tools_stats
+ORDER BY total_commits DESC;
+
+-- AI tools usage by repository
+SELECT * FROM v_ai_tools_by_repo
+WHERE repository_name = 'MyApp'
+ORDER BY total_commits DESC;
+
+-- Compare productivity with/without AI tools
+SELECT
+  CASE
+    WHEN ai_tools IS NOT NULL THEN 'With AI Tools'
+    ELSE 'Without AI Tools'
+  END as tool_usage,
+  COUNT(*) as commits,
+  ROUND(AVG(lines_added + lines_deleted), 1) as avg_lines_per_commit,
+  ROUND(SUM((lines_added + lines_deleted) * weight / 100.0), 0) as total_weighted_lines
+FROM commits
+GROUP BY (CASE WHEN ai_tools IS NOT NULL THEN 'With AI Tools' ELSE 'Without AI Tools' END);
+
+-- Monthly trend of AI tool adoption
+SELECT
+  TO_CHAR(commit_date, 'YYYY-MM') as month,
+  COUNT(*) FILTER (WHERE ai_tools IS NOT NULL) as with_ai,
+  COUNT(*) as total,
+  ROUND(COUNT(*) FILTER (WHERE ai_tools IS NOT NULL)::numeric / COUNT(*) * 100, 1) as ai_usage_pct
+FROM commits
+GROUP BY TO_CHAR(commit_date, 'YYYY-MM')
+ORDER BY month DESC;
+```
+
+### Benefits
+
+- **Measure AI impact**: Directly compare productivity metrics with/without AI tools
+- **Tool comparison**: Evaluate different AI tools' effectiveness
+- **Adoption tracking**: Monitor AI tool usage trends over time
+- **ROI analysis**: Quantify the impact of AI tool investment
+- **Team insights**: Identify which developers benefit most from AI tools
+
+### Best Practices
+
+1. **Consistent format**: Train your team to use the standard `**AI tool: ...**` format
+2. **Commit body, not subject**: Place AI tool info in the commit body, not the subject line
+3. **Be specific**: List all tools used (e.g., "Claude Code and GitHub Copilot")
+4. **Regular usage**: Add AI tool info whenever applicable to build comprehensive data
 
 ## Building the Dashboard on Replit
 

@@ -15,7 +15,13 @@ require 'pg'
 require 'optparse'
 require_relative '../lib/db_connection'
 
+# Categorizes commits by extracting business domain categories from commit subjects
+# Supports patterns: pipe delimiter, square brackets, and uppercase first word
 class CommitCategorizer
+  # Initializes a new CommitCategorizer instance
+  # @param options [Hash] configuration options
+  # @option options [Boolean] :dry_run if true, no database changes will be made (default: false)
+  # @option options [String] :repo optional repository name to filter commits
   def initialize(options = {})
     @dry_run = options[:dry_run] || false
     @repo_filter = options[:repo]
@@ -27,12 +33,18 @@ class CommitCategorizer
     }
   end
 
+  # Establishes a connection to the PostgreSQL database
+  # @return [PG::Connection] the database connection
+  # @raise [SystemExit] if connection fails
   def connect_to_db
     PG.connect(DBConnection.connection_params)
   rescue PG::Error => e
     abort "Error connecting to database: #{e.message}"
   end
 
+  # Executes the full categorization workflow
+  # Fetches commits, processes each one to extract category, and updates database
+  # @return [void]
   def run
     puts "=" * 60
     puts "Commit Categorization Script"
@@ -65,6 +77,8 @@ class CommitCategorizer
 
   private
 
+  # Fetches commits from the database, optionally filtered by repository
+  # @return [Array<Hash>] array of commit records with id, hash, subject, category, and repository_name
   def fetch_commits
     query = <<~SQL
       SELECT
@@ -85,6 +99,10 @@ class CommitCategorizer
     end
   end
 
+  # Processes a single commit to extract and update its category
+  # Skips commits that are already categorized, updates statistics
+  # @param commit [Hash] the commit record with id, hash, subject, and category fields
+  # @return [void]
   def process_commit(commit)
     @stats[:total] += 1
 
@@ -109,6 +127,11 @@ class CommitCategorizer
     @stats[:categorized] += 1
   end
 
+  # Extracts the category from a commit subject using multiple pattern matching strategies
+  # Supports: pipe delimiter (BILLING | Fix), square brackets ([BILLING] Fix), and uppercase first word (BILLING Fix)
+  # Ignores common verbs like MERGE, FIX, ADD, UPDATE, REMOVE, DELETE
+  # @param subject [String, nil] the commit subject line
+  # @return [String, nil] the extracted category in uppercase, or nil if no category found
   def extract_category(subject)
     return nil if subject.nil? || subject.strip.empty?
 
@@ -137,11 +160,18 @@ class CommitCategorizer
     nil
   end
 
+  # Updates a commit record with the extracted category
+  # @param commit_id [Integer] the commit database ID
+  # @param category [String] the category to set
+  # @return [void]
   def update_commit(commit_id, category)
     query = "UPDATE commits SET category = $1 WHERE id = $2"
     @conn.exec_params(query, [category, commit_id])
   end
 
+  # Prints a summary of categorization results
+  # Displays total commits processed, newly categorized, and category coverage percentage
+  # @return [void]
   def print_summary
     puts "\n"
     puts "=" * 60

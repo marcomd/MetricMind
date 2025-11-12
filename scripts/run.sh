@@ -422,8 +422,17 @@ if [ "$DO_LOAD" = true ] && [ $SUCCESS_COUNT -gt 0 ]; then
     fi
     echo ""
 
-    # Step 2: Refresh materialized views
-    log_info "Step 2: Refreshing materialized views..."
+    # Step 2: Calculate commit weights
+    log_info "Step 2: Calculating commit weights (revert detection)..."
+    if "$SCRIPT_DIR/calculate_commit_weights.rb" ${SINGLE_REPO:+--repo "$SINGLE_REPO"}; then
+        log_success "Commit weights calculated"
+    else
+        log_warning "Weight calculation completed with warnings"
+    fi
+    echo ""
+
+    # Step 3: Refresh materialized views
+    log_info "Step 3: Refreshing materialized views..."
     if psql -d "${PGDATABASE:-git_analytics}" -c "SELECT refresh_all_mv(); SELECT refresh_category_mv();" > /dev/null 2>&1; then
         log_success "Materialized views refreshed"
     else
