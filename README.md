@@ -59,14 +59,14 @@ This system provides comprehensive analytics to answer questions like:
 
 ```bash
 # 1. Run automated setup
-./scripts/setup.sh
+./scripts/setup.rb
 
 # 2. Edit configuration files
 vim .env                        # Database credentials (if needed)
 vim config/repositories.json    # Add your repositories
 
 # 3. Extract and analyze
-./scripts/run.sh                # Automatic extraction, loading, categorization
+./scripts/run.rb                # Automatic extraction, loading, categorization
 
 # 4. Query your data
 psql -d git_analytics -c "SELECT * FROM v_category_stats;"
@@ -87,9 +87,9 @@ That's it! The system automatically handles schema setup, migrations, data extra
 The setup procedure supports two modes:
 
 Full Setup Mode (default):
-`./scripts/setup.sh`
+`./scripts/setup.rb`
 
-- [1/6] Check prerequisites (Ruby, PostgreSQL, jq)
+- [1/6] Check prerequisites (Ruby, PostgreSQL)
 - [2/6] Install Ruby dependencies
 - [3/6] Create .env file
 - [4/6] Create databases (production + test)
@@ -97,7 +97,7 @@ Full Setup Mode (default):
 - [6/6] Create data directories
 
 Database-Only Mode:
-`./scripts/setup.sh --database-only`
+`./scripts/setup.rb --database-only`
 
 - [1/3] Check PostgreSQL only
 - [2/3] Create databases (production + test)
@@ -110,7 +110,6 @@ Database-Only Mode:
 Before starting, ensure you have:
 - **Ruby** >= 3.3 ([Installation guide](https://www.ruby-lang.org/en/documentation/installation/))
 - **PostgreSQL** >= 12 ([Installation guide](https://www.postgresql.org/download/))
-- **jq** (for multi-repo orchestration) - Install with: `brew install jq` (macOS) or `apt-get install jq` (Linux)
 - **Git repositories** to analyze
 
 ### Automated Setup (Recommended)
@@ -122,11 +121,11 @@ The fastest way to get started is using the automated setup script:
 cd MetricMind
 
 # Run the automated setup script
-./scripts/setup.sh
+./scripts/setup.rb
 ```
 
 **What this script does:**
-1. ✅ Checks prerequisites (Ruby, PostgreSQL, jq)
+1. ✅ Checks prerequisites (Ruby, PostgreSQL)
 2. ✅ Installs Ruby dependencies (`bundle install`)
 3. ✅ Creates `.env` file from template
 4. ✅ Creates production and test databases
@@ -156,7 +155,7 @@ cp .env.example .env
 
 ```bash
 # Run database-only setup (creates database, applies schema, migrations, and views)
-./scripts/setup.sh --database-only
+./scripts/setup.rb --database-only
 ```
 
 This will:
@@ -165,7 +164,7 @@ This will:
 - Run all migrations (including category column for business domain tracking)
 - Create standard views and category views
 
-**Note:** This skips Ruby dependencies and .env setup. Use `./scripts/setup.sh` (without flags) for complete first-time setup.
+**Note:** This skips Ruby dependencies and .env setup. Use `./scripts/setup.rb` (without flags) for complete first-time setup.
 
 #### 3. Database Migration
 
@@ -206,19 +205,19 @@ Edit `config/repositories.json` to add your repositories:
 
 ```bash
 # Run extraction and loading for all configured repositories
-./scripts/run.sh
+./scripts/run.rb
 
 # Or run for specific date range
-./scripts/run.sh --from "1 year ago" --to "now"
+./scripts/run.rb --from "1 year ago" --to "now"
 
 # Process single repository
-./scripts/run.sh mater
+./scripts/run.rb mater
 
 # Clean before processing (useful for fixing duplicate data)
-./scripts/run.sh --clean
+./scripts/run.rb --clean
 ```
 
-The `run.sh` script automatically:
+The `run.rb` script automatically:
 - Extracts git data from repositories (including full commit messages)
 - Extracts AI tools information from commit bodies
 - Loads data into the database
@@ -279,23 +278,23 @@ Process multiple repositories automatically:
 
 ```bash
 # Extract and load all enabled repositories (default config)
-./scripts/run.sh
+./scripts/run.rb
 
 # Use custom config file
-./scripts/run.sh --config config/my-repos.json
+./scripts/run.rb --config config/my-repos.json
 
 # Override date range
-./scripts/run.sh --from "3 months ago" --to "now"
+./scripts/run.rb --from "3 months ago" --to "now"
 
 # Process single repository
-./scripts/run.sh mater
+./scripts/run.rb mater
 
 # Advanced workflows
-./scripts/run.sh --clean                    # Clean all repos before processing
-./scripts/run.sh mater --clean              # Clean single repo before processing
-./scripts/run.sh --skip-load                # Only extract to JSON (no database)
-./scripts/run.sh --skip-extraction          # Only load from existing JSON files
-./scripts/run.sh mater --from "2024-01-01" --to "2024-12-31"
+./scripts/run.rb --clean                    # Clean all repos before processing
+./scripts/run.rb mater --clean              # Clean single repo before processing
+./scripts/run.rb --skip-load                # Only extract to JSON (no database)
+./scripts/run.rb --skip-extraction          # Only load from existing JSON files
+./scripts/run.rb mater --from "2024-01-01" --to "2024-12-31"
 ```
 
 ## Database Schema
@@ -593,7 +592,7 @@ jobs:
         with:
           ruby-version: '3.2'
       - run: bundle install
-      - run: ./scripts/run.sh
+      - run: ./scripts/run.rb
         env:
           PGHOST: ${{ secrets.PGHOST }}
           PGDATABASE: ${{ secrets.PGDATABASE }}
@@ -635,7 +634,7 @@ If you need to clean and reload data for a repository (e.g., after accidentally 
 
 ```bash
 # Clean and reload single repository (prompts for confirmation)
-./scripts/run.sh mater --clean
+./scripts/run.rb mater --clean
 
 # Or use the cleanup script directly
 ./scripts/clean_repository.rb mater
@@ -649,7 +648,7 @@ The categorization feature analyzes commit messages to understand **what** busin
 
 Categorization extracts **business domain categories** from commit subjects, enabling insights into resource allocation across different areas of your product (e.g., BILLING, CS, INFRA).
 
-**Note:** Categorization runs **automatically** as part of `./scripts/run.sh`. You don't need to run any manual commands unless you want to re-categorize existing data or check coverage.
+**Note:** Categorization runs **automatically** as part of `./scripts/run.rb`. You don't need to run any manual commands unless you want to re-categorize existing data or check coverage.
 
 ### Category Extraction
 
@@ -662,7 +661,7 @@ Categories are extracted from commit subjects using multiple patterns:
 
 ### Manual Usage (Optional)
 
-Categorization runs automatically with `./scripts/run.sh`, but you can also run it manually:
+Categorization runs automatically with `./scripts/run.rb`, but you can also run it manually:
 
 ```bash
 # Re-run categorization on all commits (useful after updating commit messages)
@@ -746,7 +745,7 @@ Categorization creates these views:
 
 ### Maintenance
 
-**Note:** When you run `./scripts/run.sh`, categorization and view refresh happen **automatically**. No manual maintenance needed!
+**Note:** When you run `./scripts/run.rb`, categorization and view refresh happen **automatically**. No manual maintenance needed!
 
 If you need to manually refresh views (e.g., after manual database updates):
 ```bash
@@ -768,7 +767,7 @@ This allows analytics to distinguish between:
 - **Total metrics**: All commits, including reverted ones
 - **Weighted metrics**: Only valid work (reverted commits weighted at 0)
 
-**Note:** Weight calculation runs **automatically** as part of `./scripts/run.sh`. No manual intervention needed!
+**Note:** Weight calculation runs **automatically** as part of `./scripts/run.rb`. No manual intervention needed!
 
 ### How It Works
 
@@ -790,7 +789,7 @@ The system detects revert patterns in commit subjects and automatically adjusts 
 
 ### Manual Usage (Optional)
 
-Weight calculation runs automatically with `./scripts/run.sh`, but you can also run it manually:
+Weight calculation runs automatically with `./scripts/run.rb`, but you can also run it manually:
 
 ```bash
 # Calculate weights for all commits
