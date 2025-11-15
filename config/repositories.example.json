@@ -1,0 +1,22 @@
+{
+  "repositories": [
+    {
+      "name": "my-backend",
+      "path": "/absolute/path/to/repo",
+      "description": "Backend API",
+      "enabled": true
+    },
+    {
+      "name": "my-frontend",
+      "path": "~/path/to/frontend",
+      "description": "React Frontend",
+      "enabled": true
+    },
+    {
+      "name": "my-mobile",
+      "path": "/absolute/path/to/mobile",
+      "description": "Mobile App (disabled example)",
+      "enabled": false
+    }
+  ]
+}

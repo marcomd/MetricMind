@@ -45,3 +45,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Config
+/config/repositories.json
