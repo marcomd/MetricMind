@@ -673,7 +673,7 @@ If you need to clean and reload data for a repository (e.g., after accidentally 
 
 ## Commit Categorization
 
-The categorization feature analyzes commit messages to understand **what** business domains developers are working on.
+The categorization feature analyzes commit messages to understand **what** business domains developers are working on. It uses a **two-stage approach**: pattern-based extraction (fast) followed by optional AI-powered categorization (intelligent).
 
 ### Overview
 
@@ -681,14 +681,178 @@ Categorization extracts **business domain categories** from commit subjects, ena
 
 **Note:** Categorization runs **automatically** as part of `./scripts/run.rb`. You don't need to run any manual commands unless you want to re-categorize existing data or check coverage.
 
-### Category Extraction
+### Two-Stage Categorization
+
+#### Stage 1: Pattern-Based Extraction (Always Active)
 
 Categories are extracted from commit subjects using multiple patterns:
 
 1. **Pipe delimiter**: `BILLING | Implemented payment gateway` → **BILLING**
 2. **Square brackets**: `[CS] Fixed widget display` → **CS**
 3. **First uppercase word**: `BILLING Implemented feature` → **BILLING**
-4. **No match**: → NULL (shown as UNCATEGORIZED in dashboard)
+4. **No match**: → NULL (moves to Stage 2 if AI enabled)
+
+This stage is fast, requires no external services, and works well for teams using standardized commit message formats.
+
+#### Stage 2: AI-Powered Categorization (Optional)
+
+For commits that pattern matching couldn't categorize, the system can use Large Language Models (LLMs) to intelligently categorize based on:
+- Commit subject (message)
+- **Modified file paths** (strong signal, e.g., `app/jobs/billing/*` → BILLING)
+- Existing categories (ensures consistency)
+
+**Key Features:**
+- 🤖 **Smart categorization** using file paths as context
+- 🎯 **Category consistency** - reuses existing categories or creates appropriate new ones
+- 🚫 **Validates categories** - automatically rejects version numbers (2.58.0), issue numbers (#6802), and other invalid patterns
+- 📊 **Confidence scoring** - tracks how confident the AI is about each categorization
+- 🔄 **Fallback pattern** - only processes uncategorized commits (efficient)
+
+**Supported Providers:**
+- **Ollama** (free, local) - Run models like llama3.2, mistral, codellama on your machine
+- **Google Gemini** (cloud, API key required) - Fast and accurate cloud-based categorization
+
+### Getting Started with AI Categorization
+
+#### First-Time Setup
+
+1. **Choose your provider and configure `.env`:**
+
+**Option A: Ollama (Local, Free)**
+```bash
+# Install Ollama
+brew install ollama  # macOS
+# or download from https://ollama.ai
+
+# Start Ollama and pull a model
+ollama serve  # In one terminal
+ollama pull gpt-oss:20b  # In another terminal
+
+# Configure in .env
+AI_PROVIDER=ollama
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=gpt-oss:20b
+OLLAMA_TEMPERATURE=0.1
+PREVENT_NUMERIC_CATEGORIES=true  # Prevents version numbers like "2.58.0"
+```
+
+**Option B: Google Gemini (Cloud)**
+```bash
+# Get API key from https://makersuite.google.com/app/apikey
+
+# Configure in .env
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_api_key_here
+GEMINI_MODEL=gemini-2.0-flash-exp
+GEMINI_TEMPERATURE=0.1
+PREVENT_NUMERIC_CATEGORIES=true  # Prevents version numbers like "2.58.0"
+```
+
+2. **Apply database migration:**
+```bash
+# Run setup to apply the AI categorization migration
+./scripts/setup.rb --database-only
+```
+
+This creates:
+- `categories` table - stores approved categories
+- `ai_confidence` column in `commits` - tracks AI categorization quality (0-100)
+
+3. **Run the pipeline:**
+```bash
+# AI categorization runs automatically if AI_PROVIDER is set
+./scripts/run.rb
+
+# Or test on a single repository
+./scripts/run.rb mater
+```
+
+#### Scenario: First Time with Existing Data
+
+If you already have data in your database and want to add AI categorization:
+
+```bash
+# 1. Configure AI provider in .env (see above)
+
+# 2. Apply migration
+./scripts/setup.rb --database-only
+
+# 3. Preview what AI will categorize (dry-run)
+./scripts/ai_categorize_commits.rb --dry-run --limit 10
+
+# 4. Run AI categorization on all uncategorized commits
+./scripts/ai_categorize_commits.rb
+
+# 5. Check results
+psql -d git_analytics -c "
+  SELECT
+    COUNT(*) FILTER (WHERE category IS NOT NULL) as categorized,
+    COUNT(*) FILTER (WHERE ai_confidence IS NOT NULL) as ai_categorized,
+    ROUND(AVG(ai_confidence) FILTER (WHERE ai_confidence IS NOT NULL), 1) as avg_confidence
+  FROM commits;
+"
+```
+
+#### Scenario: Recategorizing Existing Data
+
+To re-run AI categorization (e.g., after improving prompts or switching providers):
+
+```bash
+# Preview changes first
+./scripts/ai_categorize_commits.rb --dry-run --force --limit 10
+
+# Force recategorization of ALL commits (including already categorized ones)
+./scripts/ai_categorize_commits.rb --force
+
+# Or recategorize only a specific repository
+./scripts/ai_categorize_commits.rb --force --repo mater
+```
+
+**Note:** Using `--force` will re-categorize ALL commits, replacing existing categories. This is safe but may change your historical data.
+
+#### Scenario: Categorizing Only New Commits
+
+The default behavior only processes uncategorized commits:
+
+```bash
+# This only categorizes commits where category IS NULL
+./scripts/ai_categorize_commits.rb
+
+# Happens automatically with run.rb
+./scripts/run.rb
+```
+
+This is the recommended workflow for ongoing use.
+
+### Numeric Category Prevention
+
+By default, the system prevents creation of invalid categories.
+
+What Gets Rejected:
+  - ❌ Version numbers: `2.26.0`, `1.2.3`, `2.58.0`
+  - ❌ Issue numbers: `#5930`, `#6802`, `#117`
+  - ❌ Pure numbers: `2023`, `123`, `42`
+  - ❌ Anything with #: `#HASHTAG`, `#TAG`
+  - ❌ Too many digits: `12345ABC` (>50% digits)
+
+What Gets Accepted:
+  - ✅ Business categories: BILLING, CS, SECURITY, API
+  - ✅ Technical terms: I18N, L10N, OAUTH2, HTTP2
+  - ✅ Number-prefixed: 2FA, 3D, 3D_RENDERING ← NEW!
+  - ✅ Anything with ≤50% digits and at least one letter
+
+✅ Valid categories: `BILLING`, `SECURITY`, `DOCKER`, `API`, `DATABASE`
+
+**Configuration:**
+```bash
+# .env
+PREVENT_NUMERIC_CATEGORIES=true  # Default: true (recommended)
+
+# To allow numeric categories (not recommended):
+PREVENT_NUMERIC_CATEGORIES=false
+```
+
+The AI is explicitly instructed to avoid these patterns, and validation is enforced at the code level.
 
 ### Manual Usage (Optional)
 

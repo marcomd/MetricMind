@@ -14,6 +14,7 @@ require 'dotenv/load' unless ENV['RSPEC_RUNNING']
 require 'pg'
 require 'optparse'
 require_relative '../lib/db_connection'
+require_relative '../lib/category_validator'
 
 # Categorizes commits by extracting business domain categories from commit subjects
 # Supports patterns: pipe delimiter, square brackets, and uppercase first word
@@ -29,7 +30,8 @@ class CommitCategorizer
     @stats = {
       total: 0,
       categorized: 0,
-      already_categorized: 0
+      already_categorized: 0,
+      rejected_invalid: 0
     }
   end
 
@@ -130,47 +132,81 @@ class CommitCategorizer
   # Extracts the category from a commit subject using multiple pattern matching strategies
   # Supports: pipe delimiter (BILLING | Fix), square brackets ([BILLING] Fix), and uppercase first word (BILLING Fix)
   # Ignores common verbs like MERGE, FIX, ADD, UPDATE, REMOVE, DELETE
+  # Validates extracted categories to prevent version numbers, issue numbers, etc.
   # @param subject [String, nil] the commit subject line
   # @return [String, nil] the extracted category in uppercase, or nil if no category found
   def extract_category(subject)
     return nil if subject.nil? || subject.strip.empty?
 
+    category = nil
+
     # Pattern 1: Pipe delimiter (e.g., "BILLING | Fix bug")
     if subject.include?(' | ')
-      category = subject.split(' | ', 2).first.strip.upcase
-      return category unless category.empty?
+      extracted = subject.split(' | ', 2).first.strip.upcase
+      category = extracted unless extracted.empty?
     end
 
     # Pattern 2: Square brackets (e.g., "[BILLING] Fix bug")
-    if subject.match?(/^\[([^\]]+)\]/)
+    if category.nil? && subject.match?(/^\[([^\]]+)\]/)
       match = subject.match(/^\[([^\]]+)\]/)
-      return match[1].strip.upcase if match
+      category = match[1].strip.upcase if match
     end
 
     # Pattern 3: First word if ALL UPPERCASE (e.g., "BILLING Fix bug")
-    first_word = subject.split(/\s+/, 2).first
-    if first_word && first_word == first_word.upcase && first_word.length >= 2
-      # Ignore common all-caps words that aren't categories
-      unless ['MERGE', 'FIX', 'ADD', 'UPDATE', 'REMOVE', 'DELETE'].include?(first_word)
-        return first_word
+    if category.nil?
+      first_word = subject.split(/\s+/, 2).first
+      if first_word && first_word == first_word.upcase && first_word.length >= 2
+        # Ignore common all-caps words that aren't categories
+        unless ['MERGE', 'FIX', 'ADD', 'UPDATE', 'REMOVE', 'DELETE'].include?(first_word)
+          category = first_word
+        end
       end
     end
 
-    # No category found
-    nil
+    # Validate the extracted category
+    if category && !CategoryValidator.valid_category?(category)
+      if ENV['DEBUG'] == 'true'
+        reason = CategoryValidator.rejection_reason(category)
+        warn "[CATEGORIZER] Rejected invalid category '#{category}': #{reason}"
+      end
+      @stats[:rejected_invalid] += 1
+      return nil
+    end
+
+    category
   end
 
   # Updates a commit record with the extracted category
+  # Also inserts/updates the category in the categories table
   # @param commit_id [Integer] the commit database ID
   # @param category [String] the category to set
   # @return [void]
   def update_commit(commit_id, category)
+    # Update the commit
     query = "UPDATE commits SET category = $1 WHERE id = $2"
     @conn.exec_params(query, [category, commit_id])
+
+    # Insert or update the category in categories table
+    upsert_category(category)
+  end
+
+  # Insert or update a category in the categories table
+  # @param category_name [String] the category name
+  # @return [void]
+  def upsert_category(category_name)
+    query = <<~SQL
+      INSERT INTO categories (name, description, usage_count)
+      VALUES ($1, 'Created by pattern-based categorization', 1)
+      ON CONFLICT (name) DO UPDATE
+        SET usage_count = categories.usage_count + 1
+    SQL
+    @conn.exec_params(query, [category_name])
+  rescue PG::Error => e
+    warn "[CATEGORIZER] Failed to upsert category #{category_name}: #{e.message}" if ENV['DEBUG'] == 'true'
   end
 
   # Prints a summary of categorization results
-  # Displays total commits processed, newly categorized, and category coverage percentage
+  # Displays total commits processed, newly categorized, rejected, and category coverage percentage
   # @return [void]
   def print_summary
     puts "\n"
@@ -180,6 +216,7 @@ class CommitCategorizer
     puts "Total commits processed:      #{@stats[:total]}"
     puts "Already categorized:          #{@stats[:already_categorized]}"
     puts "Newly categorized:            #{@stats[:categorized]}"
+    puts "Rejected (invalid):           #{@stats[:rejected_invalid]}" if @stats[:rejected_invalid] > 0
     puts ""
 
     if @stats[:total] > 0
@@ -192,24 +229,27 @@ class CommitCategorizer
   end
 end
 
-# Parse command line options
-options = {}
-OptionParser.new do |opts|
-  opts.banner = "Usage: categorize_commits.rb [options]"
+# Only run if this file is executed directly (not when required by tests)
+if __FILE__ == $PROGRAM_NAME
+  # Parse command line options
+  options = {}
+  OptionParser.new do |opts|
+    opts.banner = "Usage: categorize_commits.rb [options]"
 
-  opts.on("--dry-run", "Show what would be done without making changes") do
-    options[:dry_run] = true
-  end
+    opts.on("--dry-run", "Show what would be done without making changes") do
+      options[:dry_run] = true
+    end
 
-  opts.on("--repo REPO_NAME", "Only process commits from specific repository") do |repo|
-    options[:repo] = repo
-  end
+    opts.on("--repo REPO_NAME", "Only process commits from specific repository") do |repo|
+      options[:repo] = repo
+    end
 
-  opts.on("-h", "--help", "Show this help message") do
-    puts opts
-    exit
-  end
-end.parse!
+    opts.on("-h", "--help", "Show this help message") do
+      puts opts
+      exit
+    end
+  end.parse!
 
-categorizer = CommitCategorizer.new(options)
-categorizer.run
+  categorizer = CommitCategorizer.new(options)
+  categorizer.run
+end

@@ -11,6 +11,13 @@ gem 'pg', '~> 1.5'
 # Environment variable management
 gem 'dotenv', '~> 2.8'
 
+# LLM integration for AI-powered categorization
+gem 'langchainrb', '~> 0.17'
+
+# HTTP client with retry support
+gem 'faraday', '~> 2.7'
+gem 'faraday-retry', '~> 2.2'
+
 group :development, :test do
   gem 'rspec', '~> 3.12'
   gem 'rubocop', '~> 1.50', require: false
