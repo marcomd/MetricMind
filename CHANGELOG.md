@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-11-16
+
+### Added
+- Category weight management system for flexible prioritization
+- `weight` column to `categories` table (0-100, default 100)
+- `sync_commit_weights_from_categories.rb` script for automatic weight synchronization
+- Date range filtering for AI categorization with `--from` and `--to` flags
+- Support for both git-style dates ("3 months ago") and ISO format ("2024-01-01")
+- Migration 005: Added category weight support to database schema
+- Comprehensive test suite for weight sync functionality
+- Test suite for date filtering in AI categorization
+- Project cover image update (`docs/MetricMindCover_ruby.jpg`)
+
+### Changed
+- Enhanced `ai_categorize_commits.rb` with flexible date range filtering
+- Updated `run.rb` workflow to include category weight synchronization (step 4)
+- Commits now processed in descending order by `commit_date` (newest first)
+- Updated all documentation with category weight management workflows
+- Enhanced database schema documentation with categories table details
+
+### Notes
+- Category weights enable de-prioritization of specific work types (e.g., experimental, prototype)
+- Weight sync runs automatically as part of `./scripts/run.rb` post-processing
+- Date filtering enables efficient incremental AI categorization of recent commits
+- All changes maintain backward compatibility
+
 ## [1.0.0] - 2025-11-16
 
 ### Added

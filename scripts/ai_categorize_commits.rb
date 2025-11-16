@@ -10,6 +10,9 @@ require 'dotenv/load' unless ENV['RSPEC_RUNNING']
 require 'json'
 require 'optparse'
 require 'pg'
+require 'date'
+require 'time'
+require 'open3'
 require_relative '../lib/llm/categorizer'
 require_relative '../lib/llm/client_factory'
 require_relative '../lib/db_connection'
@@ -29,6 +32,10 @@ class AICategorizeScript
     @options = options
     @project_dir = File.expand_path('..', __dir__)
     @output_dir = File.join(@project_dir, 'data', 'exports')
+
+    # Parse and validate date range if provided
+    @from_date = parse_date(options[:from_date]) if options[:from_date]
+    @to_date = parse_date(options[:to_date]) if options[:to_date]
   end
 
   def run
@@ -86,6 +93,7 @@ class AICategorizeScript
     log_info("Mode: #{options[:dry_run] ? 'DRY RUN (no changes)' : 'LIVE (will update database)'}")
     log_info("Force recategorize: #{options[:force] ? 'YES' : 'NO'}")
     log_info("Repository filter: #{options[:repo_name] || 'ALL'}")
+    log_info("Date range: #{format_date_range}") if @from_date || @to_date
     puts ''
   end
 
@@ -152,17 +160,34 @@ class AICategorizeScript
   end
 
   def fetch_uncategorized_commits(conn, repo_id)
-    query = if options[:force]
-              # Force recategorization - process all commits
-              'SELECT id, repository_id, hash, subject FROM commits WHERE repository_id = $1 ORDER BY commit_date DESC'
-            else
-              # Only process uncategorized commits
-              'SELECT id, repository_id, hash, subject FROM commits WHERE repository_id = $1 AND category IS NULL ORDER BY commit_date DESC'
-            end
+    # Build base query
+    conditions = ['repository_id = $1']
+    params = [repo_id]
+    param_index = 2
 
+    # Add category filter unless forcing recategorization
+    unless options[:force]
+      conditions << 'category IS NULL'
+    end
+
+    # Add date range filters
+    if @from_date
+      conditions << "commit_date >= $#{param_index}"
+      params << @from_date
+      param_index += 1
+    end
+
+    if @to_date
+      conditions << "commit_date <= $#{param_index}"
+      params << @to_date
+      param_index += 1
+    end
+
+    # Build complete query
+    query = "SELECT id, repository_id, hash, subject, commit_date FROM commits WHERE #{conditions.join(' AND ')} ORDER BY commit_date DESC"
     query += " LIMIT #{options[:limit]}" if options[:limit]
 
-    conn.exec_params(query, [repo_id]).to_a
+    conn.exec_params(query, params).to_a
   end
 
   def dry_run_categorization(commits, json_data, categorizer)
@@ -212,6 +237,64 @@ class AICategorizeScript
     end
   end
 
+  # Parse date string to PostgreSQL-compatible format
+  # Supports both ISO format (2024-01-01) and git-style (6 months ago, 1 year ago)
+  # @param date_str [String] date string to parse
+  # @return [String] PostgreSQL-compatible timestamp string
+  # @raise [SystemExit] if date format is invalid
+  def parse_date(date_str)
+    return nil if date_str.nil? || date_str.strip.empty?
+
+    # Try ISO format first (YYYY-MM-DD)
+    begin
+      parsed = Date.parse(date_str)
+      return parsed.to_time.strftime('%Y-%m-%d %H:%M:%S')
+    rescue ArgumentError
+      # Not a standard date format, try git-style parsing
+    end
+
+    # Use git to parse git-style dates (e.g., "6 months ago", "1 year ago", "now")
+    # This leverages git's date parsing which is very flexible
+    git_cmd = ['git', 'log', "--since=#{date_str}", '--max-count=1', '--pretty=format:%ai']
+    output, status = Open3.capture2(*git_cmd, chdir: @project_dir, err: '/dev/null')
+
+    if status.success? && !output.strip.empty?
+      # Git successfully parsed the date and returned a timestamp
+      # Convert to PostgreSQL format
+      begin
+        Time.parse(output.strip).strftime('%Y-%m-%d %H:%M:%S')
+      rescue ArgumentError => e
+        log_error("Failed to parse date '#{date_str}': #{e.message}")
+        exit(1)
+      end
+    else
+      # Check if "now" was specified
+      if date_str.downcase == 'now'
+        return Time.now.strftime('%Y-%m-%d %H:%M:%S')
+      end
+
+      log_error("Invalid date format: '#{date_str}'")
+      log_error("Supported formats:")
+      log_error("  - ISO: 2024-01-01, 2024-12-31")
+      log_error("  - Git-style: '6 months ago', '1 year ago', 'now'")
+      exit(1)
+    end
+  end
+
+  # Format date range for display
+  # @return [String] formatted date range string
+  def format_date_range
+    if @from_date && @to_date
+      "#{options[:from_date]} to #{options[:to_date]}"
+    elsif @from_date
+      "from #{options[:from_date]}"
+    elsif @to_date
+      "until #{options[:to_date]}"
+    else
+      'all time'
+    end
+  end
+
   # Logging helpers
   def log_info(message)
     puts "#{BLUE}[INFO]#{NC} #{message}"
@@ -238,7 +321,9 @@ if __FILE__ == $PROGRAM_NAME
     repo_name: nil,
     limit: nil,
     batch_size: 50,
-    debug: false
+    debug: false,
+    from_date: nil,
+    to_date: nil
   }
 
   parser = OptionParser.new do |opts|
@@ -266,6 +351,14 @@ if __FILE__ == $PROGRAM_NAME
 
     opts.on('--repo REPO_NAME', 'Process only this repository') do |repo|
       options[:repo_name] = repo
+    end
+
+    opts.on('--from DATE', 'Only categorize commits from this date onwards (e.g., "2024-01-01" or "6 months ago")') do |date|
+      options[:from_date] = date
+    end
+
+    opts.on('--to DATE', 'Only categorize commits up to this date (e.g., "2024-12-31" or "now")') do |date|
+      options[:to_date] = date
     end
 
     opts.on('--limit N', Integer, 'Limit number of commits to process') do |limit|
@@ -300,6 +393,15 @@ if __FILE__ == $PROGRAM_NAME
 
           # Process only 100 commits
           #{$PROGRAM_NAME} --limit 100
+
+          # Categorize commits from last 3 months (git-style)
+          #{$PROGRAM_NAME} --from "3 months ago" --to "now"
+
+          # Categorize commits in specific date range (ISO format)
+          #{$PROGRAM_NAME} --from "2024-01-01" --to "2024-12-31"
+
+          # Categorize recent commits from single repository
+          #{$PROGRAM_NAME} --repo mater --from "6 months ago"
 
           # Debug mode with verbose output
           #{$PROGRAM_NAME} --debug

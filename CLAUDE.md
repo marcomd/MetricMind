@@ -30,13 +30,14 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 - `repositories`: Metadata about tracked repos
 - `commits`: Per-commit granular data with unique constraint on `(repository_id, hash)`
 - `categories`: Approved business domain categories for consistent categorization
+  - `weight` (INTEGER 0-100): Category-level weight (default 100). Admin can adjust to de-prioritize categories.
 
 **Key Columns in `commits`:**
 - `category` (VARCHAR(100)): Business domain extracted from commit (NULL = uncategorized)
   - Extracted using pattern matching OR AI-powered categorization
 - `ai_confidence` (SMALLINT 0-100): Confidence score for AI-generated categories (NULL = pattern-matched or uncategorized)
   - Lower scores may indicate need for manual review
-- `weight` (INTEGER 0-100): Commit validity weight (0 = reverted, 100 = valid)
+- `weight` (INTEGER 0-100): Commit validity weight (0 = reverted, 100 = valid, or synced from category weight)
 - `ai_tools` (VARCHAR(255)): AI tools used during development
 
 **Views:**
@@ -57,7 +58,8 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
   1. Pattern-based categorization (`categorize_commits.rb`)
   2. AI-powered categorization (`ai_categorize_commits.rb` - only if AI_PROVIDER configured)
   3. Weight calculation for revert detection (`calculate_commit_weights.rb`)
-  4. Refresh materialized views
+  4. **Category weight synchronization** (`sync_commit_weights_from_categories.rb`)
+  5. Refresh materialized views
 - Supports flags: `--clean`, `--skip-extraction`, `--skip-load`, `--from DATE`, `--to DATE`
 - Single repo mode: `./scripts/run.rb mater`
 
@@ -154,6 +156,13 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 ./scripts/ai_categorize_commits.rb --force            # Force recategorization of ALL commits
 ./scripts/ai_categorize_commits.rb --limit 100        # Process only 100 commits
 ./scripts/ai_categorize_commits.rb --debug            # Enable verbose output
+./scripts/ai_categorize_commits.rb --from "3 months ago" --to "now"     # Date range (git-style)
+./scripts/ai_categorize_commits.rb --from "2024-01-01" --to "2024-12-31"  # Date range (ISO format)
+
+# Weight synchronization (runs automatically in run.rb after weight calculation)
+./scripts/sync_commit_weights_from_categories.rb      # Sync all commit weights from categories
+./scripts/sync_commit_weights_from_categories.rb --dry-run  # Preview changes
+./scripts/sync_commit_weights_from_categories.rb --repo mater  # Single repository
 
 # Clean repository data
 ./scripts/clean_repository.rb mater
@@ -193,6 +202,21 @@ psql -d git_analytics -c "
 
 # View categories and their usage
 psql -d git_analytics -c "SELECT name, usage_count, description FROM categories ORDER BY usage_count DESC LIMIT 20;"
+
+# View categories with their weights
+psql -d git_analytics -c "SELECT name, weight, usage_count, description FROM categories ORDER BY usage_count DESC LIMIT 20;"
+
+# Set category weight (admin operation)
+psql -d git_analytics -c "UPDATE categories SET weight = 50 WHERE name = 'EXPERIMENTAL';"
+
+# View commits affected by category weights
+psql -d git_analytics -c "
+  SELECT c.category, cat.weight, COUNT(*) as commits
+  FROM commits c
+  JOIN categories cat ON c.category = cat.name
+  WHERE c.weight > 0 AND cat.weight < 100
+  GROUP BY c.category, cat.weight;
+"
 
 # Find low-confidence AI categorizations for review
 psql -d git_analytics -c "
@@ -292,6 +316,7 @@ OLLAMA_TEMPERATURE=0.1
 - `002_add_users_and_oauth.sql` - Adds users and OAuth support
 - `003_add_weight_and_ai_tools.sql` - Adds weight and ai_tools columns
 - `004_add_ai_categorization.sql` - Adds categories table and ai_confidence column
+- `005_add_category_weight.sql` - Adds weight column to categories table
 
 **Adding new migrations:**
 - Name format: `NNN_description.sql` (e.g., `002_add_new_feature.sql`)

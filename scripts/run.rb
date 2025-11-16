@@ -292,6 +292,7 @@ class RunScript
     categorize_commits
     ai_categorize_commits
     calculate_weights
+    sync_commit_weights
     refresh_views
 
     puts ''
@@ -366,8 +367,26 @@ class RunScript
     puts ''
   end
 
+  def sync_commit_weights
+    log_info('Step 4: Synchronizing commit weights from categories...')
+
+    script_path = File.join(@script_dir, 'sync_commit_weights_from_categories.rb')
+    args = []
+    args += ['--repo', options[:repo_name]] if options[:repo_name]
+
+    success = system(script_path, *args)
+
+    if success
+      log_success('Commit weights synchronized')
+    else
+      log_warning('Weight synchronization completed with warnings')
+    end
+
+    puts ''
+  end
+
   def refresh_views
-    log_info('Step 4: Refreshing materialized views...')
+    log_info('Step 5: Refreshing materialized views...')
 
     db_name = ENV['PGDATABASE'] || 'git_analytics'
     sql = 'SELECT refresh_all_mv(); SELECT refresh_category_mv();'

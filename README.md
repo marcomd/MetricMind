@@ -2,6 +2,8 @@
 
 An AI-driven developer productivity analytics system that extracts, stores, and visualizes git commit data from multiple repositories to measure the impact of development tools and practices.
 
+![Cover](docs/MetricMindCover_ruby.jpg)
+
 ## Overview
 
 This system provides comprehensive analytics to answer questions like:
@@ -223,6 +225,7 @@ The `run.rb` script automatically:
 - Loads data into the database
 - **Categorizes commits** (extracts business domains from commit messages)
 - **Calculates commit weights** (detects and marks reverted commits)
+- **Synchronizes category weights** (applies category-level weights to commits)
 - **Refreshes materialized views** (for fast dashboard queries with weighted metrics)
 
 No additional steps needed - everything runs automatically!
@@ -233,11 +236,13 @@ No additional steps needed - everything runs automatically!
 - ✅ Database loading with duplicate prevention
 - ✅ **Automatic commit categorization** (extracts business domains like BILLING, CS, INFRA from commit messages)
 - ✅ **Weight calculation** (detects revert/unrevert patterns and adjusts commit weights for accurate productivity metrics)
+- ✅ **Category weight synchronization** (applies category-level weights to commits for flexible prioritization)
 - ✅ **Materialized view refresh** (ensures dashboard queries are fast, includes both weighted and unweighted metrics)
 
 See sections below for details on:
 - [Commit Categorization](#commit-categorization)
 - [Weight Calculation (Revert Detection)](#weight-calculation-revert-detection)
+- [Category Weight Management](#category-weight-management)
 - [AI Tools Tracking](#ai-tools-tracking)
 
 ## Usage
@@ -328,10 +333,26 @@ Stores per-commit data (granular level).
 | lines_deleted | INTEGER | Lines deleted (excluding binary) |
 | files_changed | INTEGER | Number of files modified |
 | category | VARCHAR(100) | Business domain category (e.g., BILLING, CS, INFRA) |
-| weight | INTEGER | Commit validity weight (0-100). Reverted commits = 0, valid commits = 100 |
+| weight | INTEGER | Commit validity weight (0-100). Reverted commits = 0, valid commits = 100. Synced from category weight. |
 | ai_tools | VARCHAR(255) | AI tools used (e.g., CLAUDE CODE, CURSOR, GITHUB COPILOT) |
+| ai_confidence | SMALLINT | AI categorization confidence (0-100). NULL if not AI-categorized. |
 
 **Unique constraint**: `(repository_id, hash)` - prevents duplicate commits
+
+#### `categories`
+Stores approved business domain categories for consistent categorization.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL | Primary key |
+| name | VARCHAR(100) | Unique category name (UPPERCASE) |
+| description | TEXT | Optional category description |
+| usage_count | INTEGER | Number of commits with this category |
+| weight | INTEGER | Category weight (0-100). Default 100. Admin can adjust to de-prioritize categories. |
+| created_at | TIMESTAMP | Creation timestamp |
+| updated_at | TIMESTAMP | Last update timestamp |
+
+**Unique constraint**: `name` - prevents duplicate categories
 
 ### Views and Aggregations
 
@@ -824,6 +845,30 @@ The default behavior only processes uncategorized commits:
 
 This is the recommended workflow for ongoing use.
 
+#### Scenario: Date Range Filtering
+
+Process only commits within a specific date range (useful for incremental processing):
+
+```bash
+# Categorize recent commits only (git-style dates)
+./scripts/ai_categorize_commits.rb --from "3 months ago" --to "now"
+
+# Categorize specific date range (ISO format)
+./scripts/ai_categorize_commits.rb --from "2024-01-01" --to "2024-12-31"
+
+# Categorize only from a specific date onwards
+./scripts/ai_categorize_commits.rb --from "6 months ago"
+
+# Combine with other options
+./scripts/ai_categorize_commits.rb --repo mater --from "1 year ago" --limit 100 --dry-run
+```
+
+**Supported date formats:**
+- **Git-style**: "6 months ago", "1 year ago", "3 weeks ago", "now"
+- **ISO format**: "2024-01-01", "2024-12-31"
+
+**Note:** Commits are always processed in descending order by `commit_date` (newest first), ensuring recent commits are prioritized.
+
 ### Numeric Category Prevention
 
 By default, the system prevents creation of invalid categories.
@@ -1034,6 +1079,97 @@ FROM commits;
 - **Quality insights**: Track revert rates to measure code quality
 - **Before/after analysis**: Compare weighted vs unweighted metrics to assess tool impact
 - **Team health**: High revert rates may indicate rushed work or insufficient testing
+
+## Category Weight Management
+
+The category weight management feature allows administrators to adjust the weight of entire categories, enabling **de-prioritization of specific work types** in productivity analytics.
+
+### Overview
+
+Each category in the `categories` table has a `weight` field (0-100):
+- **weight = 100**: Normal priority (default)
+- **weight < 100**: De-prioritized category
+- **weight = 0**: Excluded from weighted metrics
+
+This allows you to:
+- De-prioritize experimental or exploratory work
+- Exclude maintenance work from productivity calculations
+- Focus metrics on business-critical categories
+
+**Note:** Weight synchronization runs **automatically** as part of `./scripts/run.rb` after revert detection!
+
+### How It Works
+
+**Workflow:**
+1. Admin sets category weight in database (e.g., `UPDATE categories SET weight = 50 WHERE name = 'EXPERIMENTAL'`)
+2. Weight sync script runs (automatically via `run.rb` or manually)
+3. All commits with that category (except reverted ones) get their weight updated
+4. Analytics views now reflect the adjusted weights
+
+**Important:** The sync only updates commits with `weight > 0`, preserving reverted commits at weight = 0.
+
+### Managing Category Weights
+
+```bash
+# Set category weight (admin operation via SQL)
+psql -d git_analytics -c "UPDATE categories SET weight = 50 WHERE name = 'EXPERIMENTAL';"
+
+# Sync commit weights (runs automatically in run.rb)
+./scripts/sync_commit_weights_from_categories.rb
+
+# Preview changes without applying (dry-run)
+./scripts/sync_commit_weights_from_categories.rb --dry-run
+
+# Sync specific repository only
+./scripts/sync_commit_weights_from_categories.rb --repo mater
+```
+
+### Viewing Category Weights
+
+```sql
+-- View all categories with their weights
+SELECT name, weight, usage_count, description
+FROM categories
+ORDER BY usage_count DESC;
+
+-- View commits with reduced weight due to category
+SELECT
+  c.category,
+  cat.weight as category_weight,
+  COUNT(*) as commits_affected
+FROM commits c
+JOIN categories cat ON c.category = cat.name
+WHERE c.weight > 0 AND cat.weight < 100
+GROUP BY c.category, cat.weight
+ORDER BY commits_affected DESC;
+```
+
+### Use Cases
+
+**Example 1: De-prioritize experimental work**
+```sql
+-- Experimental features count at 50% weight
+UPDATE categories SET weight = 50 WHERE name = 'EXPERIMENTAL';
+```
+
+**Example 2: Exclude prototype work**
+```sql
+-- Prototypes don't count in productivity metrics
+UPDATE categories SET weight = 0 WHERE name = 'PROTOTYPE';
+```
+
+**Example 3: Reduce infrastructure work**
+```sql
+-- Infrastructure work counts at 75% weight
+UPDATE categories SET weight = 75 WHERE name = 'INFRA';
+```
+
+### Benefits
+
+- **Flexible prioritization**: Adjust category importance without deleting data
+- **Focus on business value**: Emphasize categories that matter most
+- **Fair comparisons**: Account for different types of work in productivity metrics
+- **Reversible**: Change weights anytime and resync to reflect new priorities
 
 ## AI Tools Tracking
 
