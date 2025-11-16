@@ -327,44 +327,83 @@ Stores per-commit data (granular level).
 | lines_added | INTEGER | Lines added (excluding binary) |
 | lines_deleted | INTEGER | Lines deleted (excluding binary) |
 | files_changed | INTEGER | Number of files modified |
+| category | VARCHAR(100) | Business domain category (e.g., BILLING, CS, INFRA) |
+| weight | INTEGER | Commit validity weight (0-100). Reverted commits = 0, valid commits = 100 |
+| ai_tools | VARCHAR(255) | AI tools used (e.g., CLAUDE CODE, CURSOR, GITHUB COPILOT) |
 
 **Unique constraint**: `(repository_id, hash)` - prevents duplicate commits
 
 ### Views and Aggregations
 
-#### `v_commit_details`
-Commits with repository information joined.
+#### Standard Views
 
-#### `v_daily_stats_by_repo`
-Daily aggregated statistics per repository.
+**`v_commit_details`**
+Commits with repository information, weight, ai_tools, category, and calculated lines_changed.
 
-#### `v_weekly_stats_by_repo`
-Weekly aggregated statistics per repository.
+**`v_daily_stats_by_repo`**
+Daily aggregated statistics per repository. Includes both weighted and unweighted metrics. Excludes reverted commits (weight=0).
 
-#### `mv_monthly_stats_by_repo` (Materialized)
-Pre-computed monthly statistics per repository for fast queries.
+**`v_weekly_stats_by_repo`**
+Weekly aggregated statistics per repository. Includes both weighted and unweighted metrics. Excludes reverted commits (weight=0).
+
+**`mv_monthly_stats_by_repo` (Materialized)**
+Pre-computed monthly statistics per repository for fast queries. Excludes reverted commits (weight=0).
 
 Columns include:
-- `total_commits`, `total_lines_added`, `total_lines_deleted`
-- `unique_authors`, `avg_lines_changed_per_commit`
+- Unweighted: `total_commits`, `total_lines_added`, `total_lines_deleted`, `total_files_changed`
+- Weighted: `weighted_lines_added`, `weighted_lines_deleted`, `weighted_lines_changed`, `weighted_files_changed`
+- `unique_authors`, `avg_lines_changed_per_commit`, `avg_lines_added_per_commit`
 - `avg_lines_added_per_author`, `avg_commits_per_author`
-- Month-over-month comparison data
 
-#### `v_contributor_stats`
-Aggregated statistics per contributor across all repositories.
+**`v_contributor_stats`**
+Aggregated statistics per contributor across all repositories. Includes both weighted and unweighted metrics. Excludes reverted commits (weight=0).
+
+#### Category Views
+
+**`v_category_stats`**
+Category statistics across all repositories. Shows commit volume by business domain (e.g., BILLING, CS, INFRA).
+
+**`v_category_by_repo`**
+Category breakdown per repository. Shows which repos work on which categories.
+
+**`mv_monthly_category_stats` (Materialized)**
+Monthly trends by category. Shows how work distribution across business domains changes over time.
+
+**`v_uncategorized_commits`**
+Commits missing category - useful for cleanup and improving coverage.
+
+#### AI Tools Views
+
+**`v_ai_tools_stats`**
+Statistics on AI tools usage across all repositories. Shows adoption and impact of development tools.
+
+**`v_ai_tools_by_repo`**
+AI tools usage broken down by repository.
+
+#### Revert Tracking Views
+
+**`v_reverted_commits`**
+Commits with weight=0 (reverted commits) for quality analysis.
 
 ### Refreshing Materialized Views
 
 After loading new data, refresh materialized views:
 
 ```sql
+-- Refresh all standard materialized views
 SELECT refresh_all_mv();
+
+-- Refresh all category materialized views
+SELECT refresh_category_mv();
 ```
 
 Or manually:
 ```sql
 REFRESH MATERIALIZED VIEW mv_monthly_stats_by_repo;
+REFRESH MATERIALIZED VIEW mv_monthly_category_stats;
 ```
+
+**Note:** When using `./scripts/run.rb`, materialized views are refreshed automatically.
 
 ## Query Examples
 
