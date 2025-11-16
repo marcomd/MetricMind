@@ -8,6 +8,7 @@ require 'bundler/setup' rescue nil
 require 'dotenv/load' rescue nil
 require 'optparse'
 require 'fileutils'
+require 'shellwords'
 
 # Main setup script for Git Productivity Analytics
 class SetupScript

@@ -183,11 +183,12 @@ RSpec.describe 'AI Tools and Weight Features' do
           'id' => 2,
           'hash' => 'def456',
           'subject' => 'Unrevert !10463 and fix error (!10660)',
-          'weight' => 0,
+          'weight' => 100,
           'repository_id' => 1
         }
 
-        # Should match the unrevert pattern
+        # Should match the unrevert pattern (to prevent treating it as a revert)
+        # Unrevert commits keep their default weight of 100
         expect(commit['subject']).to match(/\bUnrevert\b/i)
       end
 

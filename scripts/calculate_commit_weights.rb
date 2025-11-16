@@ -18,8 +18,8 @@ require 'pg'
 require 'optparse'
 require_relative '../lib/db_connection'
 
-# Calculates commit weights based on revert and unrevert patterns
-# Sets weight=0 for reverted commits and weight=100 for valid/unreverted commits
+# Calculates commit weights based on revert patterns
+# Sets weight=0 for reverted commits (and the revert commits themselves)
 class CommitWeightCalculator
   # Initializes a new CommitWeightCalculator instance
   # @param options [Hash] configuration options
@@ -32,9 +32,7 @@ class CommitWeightCalculator
     @stats = {
       total: 0,
       reverts_found: 0,
-      unreverts_found: 0,
-      commits_zeroed: 0,
-      commits_restored: 0
+      commits_zeroed: 0
     }
   end
 
@@ -48,7 +46,7 @@ class CommitWeightCalculator
   end
 
   # Executes the full weight calculation workflow
-  # Processes reverts in first pass (setting weight to 0) and unreverts in second pass (restoring to 100)
+  # Processes reverts and sets weight to 0 for both revert and original commits
   # @return [void]
   def run
     puts "=" * 60
@@ -64,14 +62,9 @@ class CommitWeightCalculator
 
     @conn.exec('BEGIN') unless @dry_run
 
-    # First pass: process reverts (set weight to 0)
+    # Process reverts (set weight to 0)
     commits.each do |commit|
       process_revert(commit, commits)
-    end
-
-    # Second pass: process unreverts (restore weight to 100)
-    commits.each do |commit|
-      process_unrevert(commit, commits)
     end
 
     if @dry_run
@@ -156,49 +149,6 @@ class CommitWeightCalculator
     end
   end
 
-  # Processes a commit to detect if it's an unrevert and restores weights accordingly
-  # Extracts PR/MR numbers and sets weight=100 for the original commits (if they're not reverts themselves)
-  # @param commit [Hash] the commit record to process
-  # @param all_commits [Array<Hash>] all commits for finding related commits by PR/MR number
-  # @return [void]
-  def process_unrevert(commit, all_commits)
-    # Check if this is an unrevert commit (case-insensitive)
-    return unless commit['subject'] =~ /\bUnrevert\b/i
-
-    @stats[:unreverts_found] += 1
-
-    # Extract PR/MR numbers from the unrevert commit subject
-    pr_numbers = extract_pr_numbers(commit['subject'])
-
-    if pr_numbers.empty?
-      puts "[WARNING] Unrevert commit found but no PR/MR number: #{commit['hash'][0..7]} - #{commit['subject']}"
-      return
-    end
-
-    # Find original commits with matching PR/MR numbers in the same repository
-    pr_numbers.each do |pr_number|
-      original_commits = find_commits_by_pr_number(
-        pr_number,
-        commit['repository_id'],
-        all_commits,
-        exclude_hash: commit['hash']
-      )
-
-      if original_commits.empty?
-        puts "[WARNING] No original commit found for PR #{pr_number} in unrevert: #{commit['hash'][0..7]}"
-        next
-      end
-
-      # Restore weight to 100 for original commits
-      original_commits.each do |original|
-        # Only restore if it's not a revert itself
-        next if original['subject'] =~ /\bRevert\b/i && original['subject'] !~ /\bUnrevert\b/i
-
-        set_weight(original, 100, "Unreverted by #{commit['hash'][0..7]}")
-      end
-    end
-  end
-
   # Extracts PR/MR numbers from a commit subject
   # Supports GitLab style (!12345) and GitHub style (#12345)
   # @param subject [String] the commit subject line
@@ -253,11 +203,7 @@ class CommitWeightCalculator
       print '.'
     end
 
-    if new_weight.zero?
-      @stats[:commits_zeroed] += 1
-    elsif new_weight == 100
-      @stats[:commits_restored] += 1
-    end
+    @stats[:commits_zeroed] += 1 if new_weight.zero?
   end
 
   # Updates a commit's weight in the database
@@ -270,7 +216,7 @@ class CommitWeightCalculator
   end
 
   # Prints a summary of weight calculation results
-  # Displays total commits, reverts found, unreverts found, and weight changes
+  # Displays total commits, reverts found, and weight changes
   # @return [void]
   def print_summary
     puts "\n"
@@ -279,9 +225,7 @@ class CommitWeightCalculator
     puts "=" * 60
     puts "Total commits processed:      #{@stats[:total]}"
     puts "Revert commits found:         #{@stats[:reverts_found]}"
-    puts "Unrevert commits found:       #{@stats[:unreverts_found]}"
     puts "Commits set to weight=0:      #{@stats[:commits_zeroed]}"
-    puts "Commits restored to weight=100: #{@stats[:commits_restored]}"
     puts "=" * 60
   end
 end

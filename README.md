@@ -808,15 +808,18 @@ The system detects revert patterns in commit subjects and automatically adjusts 
 ```
 1. CS | Move HTML content (!10463)              → weight = 100 (valid)
 2. Revert "CS | Move HTML content (!10463)"     → weight = 0 (revert)
-   ↳ Also sets commit #1 to weight = 0
-3. Unrevert !10463 and fix error (!10660)       → weight = 100 (restored)
-   ↳ Restores work that was reverted
+   ↳ Also sets commit #1 to weight = 0 (because it was reverted)
+3. Unrevert !10463 and fix error (!10660)       → weight = 100 (valid)
+   ↳ Unrevert commit contains the work from commit #1, so it counts once
+   ↳ Commit #1 stays at weight = 0 to avoid double-counting
 ```
 
 **Detection logic:**
-- **"Revert" keyword**: Identifies revert commits
+- **"Revert" keyword**: Identifies revert commits (case-insensitive)
 - **PR/MR numbers**: Links reverts to original commits via `(!12345)` or `(#12345)`
-- **"Unrevert" keyword**: Restores weight to valid commits
+- **"Unrevert" keyword**: Prevents unrevert commits from being treated as reverts (they keep weight = 100)
+
+**Important:** When a commit is unreverted, the unrevert commit itself contains all the work from the original commit (often with additional fixes). The original commit stays at weight=0 to prevent double-counting the same work.
 
 ### Manual Usage (Optional)
 
