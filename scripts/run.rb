@@ -166,7 +166,7 @@ class RunScript
 
     # Step 2: Extract (if not skipped)
     if options[:extract]
-      return unless extract_repository(repo_name, repo_path, output_file)
+      return unless extract_repository(repo_name, repo_path, output_file, repo['description'])
 
       puts ''
     elsif options[:load] && !File.exist?(output_file)
@@ -215,19 +215,22 @@ class RunScript
     true
   end
 
-  def extract_repository(repo_name, repo_path, output_file)
+  def extract_repository(repo_name, repo_path, output_file, repo_description = nil)
     step_num = options[:clean] ? 2 : 1
     log_info("Step #{step_num}: Extracting git data...")
 
     script_path = File.join(@script_dir, 'git_extract_to_json.rb')
-    success = system(
+    args = [
       script_path,
       options[:from_date],
       options[:to_date],
       output_file,
       repo_name,
       repo_path
-    )
+    ]
+    args << repo_description if repo_description
+
+    success = system(*args)
 
     unless success
       log_error("Extraction failed for #{repo_name}")

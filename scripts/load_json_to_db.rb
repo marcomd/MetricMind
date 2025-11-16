@@ -142,6 +142,7 @@ class DataLoader
 
     repo_name = @data['repository']
     repo_path = @data['repository_path']
+    repo_description = @data['repository_description']
     extraction_date = @data['extraction_date']
 
     # Check if repository exists
@@ -154,16 +155,16 @@ class DataLoader
       # Update existing repository
       @repo_id = result[0]['id'].to_i
       @conn.exec_params(
-        'UPDATE repositories SET last_extracted_at = $1, updated_at = $2, url = $3 WHERE id = $4',
-        [extraction_date, Time.now, repo_path, @repo_id]
+        'UPDATE repositories SET last_extracted_at = $1, updated_at = $2, url = $3, description = $4 WHERE id = $5',
+        [extraction_date, Time.now, repo_path, repo_description, @repo_id]
       )
       @stats[:repos_updated] += 1
       puts "  ✓ Updated existing repository (ID: #{@repo_id})"
     else
       # Insert new repository
       result = @conn.exec_params(
-        'INSERT INTO repositories (name, url, last_extracted_at) VALUES ($1, $2, $3) RETURNING id',
-        [repo_name, repo_path, extraction_date]
+        'INSERT INTO repositories (name, url, description, last_extracted_at) VALUES ($1, $2, $3, $4) RETURNING id',
+        [repo_name, repo_path, repo_description, extraction_date]
       )
       @repo_id = result[0]['id'].to_i
       @stats[:repos_created] += 1

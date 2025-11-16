@@ -18,12 +18,14 @@ class GitExtractor
   # @param output_file [String] path to the output JSON file (tilde paths will be expanded)
   # @param repo_name [String, nil] optional repository name (auto-detected if nil)
   # @param repo_path [String] path to the git repository (default: current directory)
-  def initialize(from_date, to_date, output_file, repo_name = nil, repo_path = '.')
+  # @param repo_description [String, nil] optional repository description
+  def initialize(from_date, to_date, output_file, repo_name = nil, repo_path = '.', repo_description = nil)
     @from_date = from_date
     @to_date = to_date
     @output_file = File.expand_path(output_file)
     @repo_path = File.expand_path(repo_path)
     @repo_name = repo_name || detect_repo_name
+    @repo_description = repo_description
     @commits = []
   end
 
@@ -285,6 +287,7 @@ class GitExtractor
     output_data = {
       repository: @repo_name,
       repository_path: File.expand_path(@repo_path),
+      repository_description: @repo_description,
       extraction_date: Time.now.iso8601,
       date_range: {
         from: @from_date,
@@ -323,14 +326,15 @@ if __FILE__ == $PROGRAM_NAME
       Git Commit Data Extractor (JSON Export)
 
       Usage:
-        #{$PROGRAM_NAME} FROM_DATE TO_DATE OUTPUT_FILE [REPO_NAME] [REPO_PATH]
+        #{$PROGRAM_NAME} FROM_DATE TO_DATE OUTPUT_FILE [REPO_NAME] [REPO_PATH] [REPO_DESCRIPTION]
 
       Arguments:
-        FROM_DATE    Start date (e.g., "2025-07-01" or "4 months ago")
-        TO_DATE      End date (e.g., "2025-11-01" or "now")
-        OUTPUT_FILE  Path to output JSON file (e.g., "data/repo1.json")
-        REPO_NAME    Optional: Repository name (auto-detected if omitted)
-        REPO_PATH    Optional: Path to git repository (default: current directory)
+        FROM_DATE         Start date (e.g., "2025-07-01" or "4 months ago")
+        TO_DATE           End date (e.g., "2025-11-01" or "now")
+        OUTPUT_FILE       Path to output JSON file (e.g., "data/repo1.json")
+        REPO_NAME         Optional: Repository name (auto-detected if omitted)
+        REPO_PATH         Optional: Path to git repository (default: current directory)
+        REPO_DESCRIPTION  Optional: Repository description
 
       Examples:
         # Extract last 4 months from current repo
@@ -339,8 +343,8 @@ if __FILE__ == $PROGRAM_NAME
         # Extract specific date range from another repo
         #{$PROGRAM_NAME} "2025-07-01" "2025-11-01" "data/app1.json" "MyApp" "/path/to/repo"
 
-        # Extract with custom repository name
-        #{$PROGRAM_NAME} "1 year ago" "now" "data/exports/backend.json" "backend-api"
+        # Extract with custom repository name and description
+        #{$PROGRAM_NAME} "1 year ago" "now" "data/exports/backend.json" "backend-api" "." "Backend API service"
     HELP
     exit(ARGV.include?('-h') || ARGV.include?('--help') ? 0 : 1)
   end
@@ -350,9 +354,10 @@ if __FILE__ == $PROGRAM_NAME
   output_file = ARGV[2]
   repo_name = ARGV[3]
   repo_path = ARGV[4] || '.'
+  repo_description = ARGV[5]
 
   begin
-    extractor = GitExtractor.new(from_date, to_date, output_file, repo_name, repo_path)
+    extractor = GitExtractor.new(from_date, to_date, output_file, repo_name, repo_path, repo_description)
     extractor.run
   rescue Interrupt
     puts "\n\nInterrupted by user"

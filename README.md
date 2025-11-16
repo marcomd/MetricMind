@@ -543,14 +543,6 @@ OUTPUT_DIR=./data/exports
 3. Configure repositories
 4. Run extraction
 
-### Replit Deployment
-
-1. Fork this repository to Replit
-2. Add PostgreSQL database (Replit provides built-in PostgreSQL)
-3. Set environment variables in Replit Secrets
-4. Run extraction script
-5. Build dashboard using Replit's web interface
-
 ### Production (Cloud)
 
 1. **Database**: Use managed PostgreSQL (AWS RDS, Google Cloud SQL, Heroku Postgres, Neon)
@@ -779,7 +771,7 @@ The system detects revert patterns in commit subjects and automatically adjusts 
 2. Revert "CS | Move HTML content (!10463)"     → weight = 0 (revert)
    ↳ Also sets commit #1 to weight = 0
 3. Unrevert !10463 and fix error (!10660)       → weight = 100 (restored)
-   ↳ Restores commit #1 to weight = 100
+   ↳ Restores work that was reverted
 ```
 
 **Detection logic:**
