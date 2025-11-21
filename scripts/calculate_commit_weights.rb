@@ -230,24 +230,27 @@ class CommitWeightCalculator
   end
 end
 
-# Parse command line options
-options = {}
-OptionParser.new do |opts|
-  opts.banner = "Usage: calculate_commit_weights.rb [options]"
+# Only run if this file is executed directly (not when required by tests)
+if __FILE__ == $PROGRAM_NAME
+  # Parse command line options
+  options = {}
+  OptionParser.new do |opts|
+    opts.banner = "Usage: calculate_commit_weights.rb [options]"
 
-  opts.on("--dry-run", "Show what would be done without making changes") do
-    options[:dry_run] = true
-  end
+    opts.on("--dry-run", "Show what would be done without making changes") do
+      options[:dry_run] = true
+    end
 
-  opts.on("--repo REPO_NAME", "Only process commits from specific repository") do |repo|
-    options[:repo] = repo
-  end
+    opts.on("--repo REPO_NAME", "Only process commits from specific repository") do |repo|
+      options[:repo] = repo
+    end
 
-  opts.on("-h", "--help", "Show this help message") do
-    puts opts
-    exit
-  end
-end.parse!
+    opts.on("-h", "--help", "Show this help message") do
+      puts opts
+      exit
+    end
+  end.parse!
 
-calculator = CommitWeightCalculator.new(options)
-calculator.run
+  calculator = CommitWeightCalculator.new(options)
+  calculator.run
+end

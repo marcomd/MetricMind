@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2025-11-20
+
+### Added
+- **Weight analysis columns to all PostgreSQL views**:
+  - `effective_commits` - Weighted commit count (e.g., 263 commits at 50% = 131.5 effective commits)
+  - `avg_weight` - Average weight across commits in the aggregation
+  - `weight_efficiency_pct` - Percentage showing weight impact (100% = no de-prioritization)
+  - `category_weight` (category views only) - Category's configured weight from categories table
+- **New comprehensive test suite** (`spec/views_spec.rb`):
+  - 19 tests verifying view column structure for all views
+  - Integration tests for weight metric calculations
+  - Tests for category_weight JOIN with categories table
+  - Verification of effective commits, avg_weight, and efficiency calculations
+- **Weight synchronization integration tests** in `spec/database_integration_spec.rb`:
+  - End-to-end test for weight sync from categories to commits
+  - Test for reverted commit preservation (weight=0 not synced)
+- **Enhanced documentation** with weight analysis guidance:
+  - README.md: 3 new query example sections (weight efficiency, category impact, repository comparison)
+  - README.md: New "Analyzing Weight Impact" section with psql commands
+  - CLAUDE.md: Updated view documentation with weight columns
+  - CLAUDE.md: New database operation examples for weight analysis
+
+### Fixed
+- **Critical bug in `sync_commit_weights_from_categories.rb`**:
+  - Fixed cartesian join issue in `build_update_query` method
+  - Removed unnecessary `FROM repositories r` clause when no repository filter specified
+  - Issue caused unpredictable weight synchronization behavior
+  - Now correctly updates commit weights without cartesian joins
+- **Performance improvement in `build_count_query` method**:
+  - Removed unnecessary JOIN when counting commits without repository filter
+  - Faster query execution for category statistics
+
+### Changed
+- **Updated all standard views** (7 views):
+  - `v_daily_stats_by_repo`
+  - `v_weekly_stats_by_repo`
+  - `mv_monthly_stats_by_repo`
+  - `v_contributor_stats`
+  - `v_ai_tools_stats`
+  - `v_ai_tools_by_repo`
+  - `v_commit_details`
+- **Updated all category views** (3 views):
+  - `v_category_stats`
+  - `v_category_by_repo`
+  - `mv_monthly_category_stats`
+- **Enhanced view definitions** in `schema/postgres_views.sql` and `schema/category_views.sql`:
+  - Category views now JOIN with `categories` table to expose category weights
+  - All views calculate effective commits using `SUM(weight / 100.0)`
+  - Efficiency percentage shows real-time impact of weight adjustments
+
+### Notes
+- **Weight analysis enables UI transparency**: Frontend can now display both raw and effective commit counts
+- **Category weight visibility**: UI can show which categories are de-prioritized and by how much
+- **Backward compatible**: Existing queries continue to work; new columns are additive
+- **Test coverage**: 21 new tests ensure weight analysis features work correctly
+- **For UI teams**: See README.md "Weight efficiency analysis" section for query examples
+- **Performance**: Materialized views maintain fast query performance despite additional calculations
+
+### Migration Required
+After updating, refresh materialized views with existing data:
+```bash
+psql -d git_analytics -c "SELECT refresh_all_mv(); SELECT refresh_category_mv();"
+```
+
+Or run the full pipeline to apply all changes:
+```bash
+./scripts/run.rb
+```
+
 ## [1.1.0] - 2025-11-16
 
 ### Added

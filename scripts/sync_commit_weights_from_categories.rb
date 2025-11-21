@@ -151,20 +151,28 @@ class CommitWeightSynchronizer
   # Builds the SQL query to count commits for a category
   # @return [String] the SQL query
   def build_count_query
-    base_query = <<~SQL
-      SELECT
-        COUNT(*) as total,
-        COUNT(*) FILTER (WHERE c.weight > 0) as non_reverted,
-        COUNT(*) FILTER (WHERE c.weight = 0) as reverted
-      FROM commits c
-      JOIN repositories r ON c.repository_id = r.id
-      WHERE c.category = $#{@repo_filter ? 2 : 1}
-    SQL
-
     if @repo_filter
-      "#{base_query.gsub('WHERE', 'WHERE r.name = $1 AND')}"
+      # With repository filter: JOIN with repositories table
+      <<~SQL
+        SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE c.weight > 0) as non_reverted,
+          COUNT(*) FILTER (WHERE c.weight = 0) as reverted
+        FROM commits c
+        JOIN repositories r ON c.repository_id = r.id
+        WHERE r.name = $1
+          AND c.category = $2
+      SQL
     else
-      base_query
+      # Without repository filter: Query commits directly
+      <<~SQL
+        SELECT
+          COUNT(*) as total,
+          COUNT(*) FILTER (WHERE c.weight > 0) as non_reverted,
+          COUNT(*) FILTER (WHERE c.weight = 0) as reverted
+        FROM commits c
+        WHERE c.category = $1
+      SQL
     end
   end
 
@@ -185,19 +193,25 @@ class CommitWeightSynchronizer
   # Builds the SQL query to update commit weights
   # @return [String] the SQL query
   def build_update_query
-    base_query = <<~SQL
-      UPDATE commits c
-      SET weight = $#{@repo_filter ? 2 : 1}
-      FROM repositories r
-      WHERE c.repository_id = r.id
-        AND c.category = $#{@repo_filter ? 3 : 2}
-        AND c.weight > 0
-    SQL
-
     if @repo_filter
-      base_query.gsub('WHERE', 'WHERE r.name = $1 AND')
+      # With repository filter: JOIN with repositories table
+      <<~SQL
+        UPDATE commits c
+        SET weight = $2
+        FROM repositories r
+        WHERE c.repository_id = r.id
+          AND r.name = $1
+          AND c.category = $3
+          AND c.weight > 0
+      SQL
     else
-      base_query
+      # Without repository filter: Direct update, no JOIN needed
+      <<~SQL
+        UPDATE commits c
+        SET weight = $1
+        WHERE c.category = $2
+          AND c.weight > 0
+      SQL
     end
   end
 

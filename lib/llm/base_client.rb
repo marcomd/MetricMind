@@ -110,7 +110,8 @@ module LLM
     # @return [Hash] { category: String, confidence: Integer, reason: String }
     def parse_categorization_response(response)
       # Extract category (required) - stop at newline or end of string
-      category_match = response.match(/CATEGORY:\s*([A-Z][A-Z0-9_\s-]+?)(?:\n|$)/i)
+      # Allow categories starting with numbers, #, and containing dots so validation can reject them with proper error
+      category_match = response.match(/CATEGORY:\s*([A-Z0-9#][A-Z0-9._\s#-]*?)(?:\n|$)/i)
       raise APIError, 'Could not extract category from LLM response' unless category_match
 
       category = category_match[1].strip.upcase

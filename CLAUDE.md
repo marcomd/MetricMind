@@ -42,7 +42,11 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 
 **Views:**
 - Standard: `v_daily_stats_by_repo`, `v_weekly_stats_by_repo`, `mv_monthly_stats_by_repo` (materialized)
+  - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`
 - Category: `v_category_stats`, `v_category_by_repo`, `mv_monthly_category_stats` (materialized)
+  - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`
+- AI Tools: `v_ai_tools_stats`, `v_ai_tools_by_repo`
+  - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`
 - Uncategorized: `v_uncategorized_commits` (for monitoring coverage)
 
 **Important**: Materialized views must be refreshed after loading data:
@@ -225,6 +229,23 @@ psql -d git_analytics -c "
   WHERE ai_confidence IS NOT NULL AND ai_confidence < 70
   ORDER BY ai_confidence ASC
   LIMIT 20;
+"
+
+# Analyze weight efficiency by repository
+psql -d git_analytics -c "
+  SELECT repository_name,
+         ROUND(AVG(weight_efficiency_pct), 1) as avg_efficiency
+  FROM mv_monthly_stats_by_repo
+  GROUP BY repository_name
+  ORDER BY avg_efficiency ASC;
+"
+
+# View category weights and their impact
+psql -d git_analytics -c "
+  SELECT category, category_weight, total_commits, effective_commits
+  FROM v_category_stats
+  WHERE category_weight < 100
+  ORDER BY total_commits DESC;
 "
 ```
 

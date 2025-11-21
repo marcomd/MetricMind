@@ -373,22 +373,27 @@ Pre-computed monthly statistics per repository for fast queries. Excludes revert
 Columns include:
 - Unweighted: `total_commits`, `total_lines_added`, `total_lines_deleted`, `total_files_changed`
 - Weighted: `weighted_lines_added`, `weighted_lines_deleted`, `weighted_lines_changed`, `weighted_files_changed`
-- `unique_authors`, `avg_lines_changed_per_commit`, `avg_lines_added_per_commit`
-- `avg_lines_added_per_author`, `avg_commits_per_author`
+- Weight analysis: `effective_commits`, `avg_weight`, `weight_efficiency_pct`
+- Averages: `unique_authors`, `avg_lines_changed_per_commit`, `avg_lines_added_per_commit`
+- Per-author: `avg_lines_added_per_author`, `avg_commits_per_author`
 
 **`v_contributor_stats`**
 Aggregated statistics per contributor across all repositories. Includes both weighted and unweighted metrics. Excludes reverted commits (weight=0).
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`.
 
 #### Category Views
 
 **`v_category_stats`**
 Category statistics across all repositories. Shows commit volume by business domain (e.g., BILLING, CS, INFRA).
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`.
 
 **`v_category_by_repo`**
 Category breakdown per repository. Shows which repos work on which categories.
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`.
 
 **`mv_monthly_category_stats` (Materialized)**
 Monthly trends by category. Shows how work distribution across business domains changes over time.
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`.
 
 **`v_uncategorized_commits`**
 Commits missing category - useful for cleanup and improving coverage.
@@ -397,9 +402,11 @@ Commits missing category - useful for cleanup and improving coverage.
 
 **`v_ai_tools_stats`**
 Statistics on AI tools usage across all repositories. Shows adoption and impact of development tools.
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`.
 
 **`v_ai_tools_by_repo`**
 AI tools usage broken down by repository.
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`.
 
 #### Revert Tracking Views
 
@@ -506,6 +513,64 @@ SELECT
 FROM mv_monthly_stats_by_repo
 WHERE month_start_date BETWEEN '2025-09-01' AND '2025-10-31'
     AND repository_name = 'backend-api';
+```
+
+### Weight efficiency analysis
+
+Compare raw commits vs effective commits to understand the impact of weight adjustments:
+
+```sql
+-- Repository weight efficiency over time
+SELECT
+    repository_name,
+    year_month,
+    total_commits,
+    effective_commits,
+    avg_weight,
+    weight_efficiency_pct,
+    total_lines_changed,
+    weighted_lines_changed
+FROM mv_monthly_stats_by_repo
+WHERE month_start_date >= '2025-01-01'
+ORDER BY repository_name, year_month DESC;
+```
+
+### Category weight impact
+
+Identify categories with reduced weights and their impact on metrics:
+
+```sql
+-- Categories with de-prioritized weights
+SELECT
+    category,
+    category_weight,
+    total_commits,
+    effective_commits,
+    ROUND((total_commits - effective_commits)::numeric, 2) as commits_discounted,
+    weight_efficiency_pct,
+    total_lines_changed,
+    weighted_lines_changed
+FROM v_category_stats
+WHERE category_weight < 100
+ORDER BY total_commits DESC;
+```
+
+### Weight efficiency by repository
+
+See which repositories have the most weight adjustments:
+
+```sql
+-- Repositories ranked by weight efficiency
+SELECT
+    repository_name,
+    SUM(total_commits) as total_commits,
+    ROUND(SUM(effective_commits), 2) as effective_commits,
+    ROUND(AVG(weight_efficiency_pct), 1) as avg_efficiency_pct,
+    ROUND((SUM(total_commits) - SUM(effective_commits))::numeric, 2) as discounted_commits
+FROM mv_monthly_stats_by_repo
+GROUP BY repository_name
+HAVING AVG(weight_efficiency_pct) < 100
+ORDER BY discounted_commits DESC;
 ```
 
 ## Data Format
@@ -1001,7 +1066,7 @@ The weight calculation feature tracks commit validity by detecting reverted comm
 
 Commits have a `weight` field (0-100) that reflects their validity:
 - **weight = 100**: Valid commit (default)
-- **weight = 0**: Reverted commit (excluded from weighted metrics)
+- **weight = 0**: Excluded commit from weighted metrics (e.g. the reverted ones)
 
 This allows analytics to distinguish between:
 - **Total metrics**: All commits, including reverted ones
@@ -1170,6 +1235,47 @@ UPDATE categories SET weight = 75 WHERE name = 'INFRA';
 - **Focus on business value**: Emphasize categories that matter most
 - **Fair comparisons**: Account for different types of work in productivity metrics
 - **Reversible**: Change weights anytime and resync to reflect new priorities
+
+### Analyzing Weight Impact
+
+After adjusting category weights, use these queries to analyze the impact:
+
+```sql
+-- View weight efficiency across repositories
+psql -d git_analytics -c "
+  SELECT
+    repository_name,
+    SUM(total_commits) as commits,
+    ROUND(SUM(effective_commits), 2) as effective_commits,
+    ROUND(AVG(weight_efficiency_pct), 1) as avg_efficiency_pct
+  FROM mv_monthly_stats_by_repo
+  GROUP BY repository_name
+  ORDER BY commits DESC;
+"
+
+-- View category weights and their impact
+psql -d git_analytics -c "
+  SELECT
+    category,
+    category_weight,
+    total_commits,
+    effective_commits,
+    weight_efficiency_pct
+  FROM v_category_stats
+  WHERE category_weight < 100
+  ORDER BY total_commits DESC;
+"
+
+-- Check which commits are affected by category weights
+psql -d git_analytics -c "
+  SELECT c.category, cat.weight, COUNT(*) as commits
+  FROM commits c
+  JOIN categories cat ON c.category = cat.name
+  WHERE c.weight > 0 AND cat.weight < 100
+  GROUP BY c.category, cat.weight
+  ORDER BY commits DESC;
+"
+```
 
 ## AI Tools Tracking
 

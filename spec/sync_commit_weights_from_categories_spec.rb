@@ -5,11 +5,11 @@ require_relative '../scripts/sync_commit_weights_from_categories'
 
 RSpec.describe CommitWeightSynchronizer do
   let(:mock_conn) { instance_double(PG::Connection) }
-  let(:synchronizer) { CommitWeightSynchronizer.new(dry_run: true) }
-
-  before do
-    allow(synchronizer).to receive(:connect_to_db).and_return(mock_conn)
+  let(:synchronizer) do
+    # Stub PG.connect before creating synchronizer
+    allow(PG).to receive(:connect).and_return(mock_conn)
     allow(mock_conn).to receive(:close)
+    CommitWeightSynchronizer.new(dry_run: true)
   end
 
   describe '#initialize' do
@@ -65,8 +65,9 @@ RSpec.describe CommitWeightSynchronizer do
 
     context 'when commits exist for category' do
       it 'updates category statistics' do
-        count_result = instance_double(PG::Result,
-                                       to_a: [{ 'total' => '10', 'non_reverted' => '8', 'reverted' => '2' }])
+        count_data = { 'total' => '10', 'non_reverted' => '8', 'reverted' => '2' }
+        count_result = instance_double(PG::Result, to_a: [count_data])
+        allow(count_result).to receive(:[]).with(0).and_return(count_data)
         allow(mock_conn).to receive(:exec_params).and_return(count_result)
 
         synchronizer.send(:process_category, category)
@@ -77,8 +78,9 @@ RSpec.describe CommitWeightSynchronizer do
       end
 
       it 'tracks per-category statistics' do
-        count_result = instance_double(PG::Result,
-                                       to_a: [{ 'total' => '10', 'non_reverted' => '8', 'reverted' => '2' }])
+        count_data = { 'total' => '10', 'non_reverted' => '8', 'reverted' => '2' }
+        count_result = instance_double(PG::Result, to_a: [count_data])
+        allow(count_result).to receive(:[]).with(0).and_return(count_data)
         allow(mock_conn).to receive(:exec_params).and_return(count_result)
 
         synchronizer.send(:process_category, category)
@@ -94,8 +96,9 @@ RSpec.describe CommitWeightSynchronizer do
 
     context 'when no non-reverted commits exist' do
       it 'skips update and does not track category stats' do
-        count_result = instance_double(PG::Result,
-                                       to_a: [{ 'total' => '5', 'non_reverted' => '0', 'reverted' => '5' }])
+        count_data = { 'total' => '5', 'non_reverted' => '0', 'reverted' => '5' }
+        count_result = instance_double(PG::Result, to_a: [count_data])
+        allow(count_result).to receive(:[]).with(0).and_return(count_data)
         allow(mock_conn).to receive(:exec_params).and_return(count_result)
 
         synchronizer.send(:process_category, category)
@@ -116,11 +119,10 @@ RSpec.describe CommitWeightSynchronizer do
     end
 
     context 'with repository filter' do
-      let(:synchronizer_with_repo) { CommitWeightSynchronizer.new(dry_run: true, repo: 'mater') }
-
-      before do
-        allow(synchronizer_with_repo).to receive(:connect_to_db).and_return(mock_conn)
+      let(:synchronizer_with_repo) do
+        allow(PG).to receive(:connect).and_return(mock_conn)
         allow(mock_conn).to receive(:close)
+        CommitWeightSynchronizer.new(dry_run: true, repo: 'mater')
       end
 
       it 'builds query with repository filter' do
@@ -143,11 +145,10 @@ RSpec.describe CommitWeightSynchronizer do
     end
 
     context 'with repository filter' do
-      let(:synchronizer_with_repo) { CommitWeightSynchronizer.new(dry_run: true, repo: 'mater') }
-
-      before do
-        allow(synchronizer_with_repo).to receive(:connect_to_db).and_return(mock_conn)
+      let(:synchronizer_with_repo) do
+        allow(PG).to receive(:connect).and_return(mock_conn)
         allow(mock_conn).to receive(:close)
+        CommitWeightSynchronizer.new(dry_run: true, repo: 'mater')
       end
 
       it 'builds query with repository filter' do
@@ -167,11 +168,10 @@ RSpec.describe CommitWeightSynchronizer do
 
   describe '#update_commits_for_category' do
     context 'in live mode' do
-      let(:live_synchronizer) { CommitWeightSynchronizer.new(dry_run: false) }
-
-      before do
-        allow(live_synchronizer).to receive(:connect_to_db).and_return(mock_conn)
+      let(:live_synchronizer) do
+        allow(PG).to receive(:connect).and_return(mock_conn)
         allow(mock_conn).to receive(:close)
+        CommitWeightSynchronizer.new(dry_run: false)
       end
 
       it 'executes update query with correct parameters' do
@@ -203,8 +203,9 @@ RSpec.describe CommitWeightSynchronizer do
 
     it 'displays preview messages' do
       categories = [{ 'id' => '1', 'name' => 'BILLING', 'weight' => '50' }]
-      count_result = instance_double(PG::Result,
-                                     to_a: [{ 'total' => '10', 'non_reverted' => '8', 'reverted' => '2' }])
+      count_data = { 'total' => '10', 'non_reverted' => '8', 'reverted' => '2' }
+      count_result = instance_double(PG::Result, to_a: [count_data])
+      allow(count_result).to receive(:[]).with(0).and_return(count_data)
 
       allow(mock_conn).to receive(:exec).and_return(
         instance_double(PG::Result, to_a: categories)
@@ -225,8 +226,9 @@ RSpec.describe CommitWeightSynchronizer do
 
     it 'counts reverted commits separately' do
       category = { 'id' => '1', 'name' => 'BILLING', 'weight' => '50' }
-      count_result = instance_double(PG::Result,
-                                     to_a: [{ 'total' => '10', 'non_reverted' => '7', 'reverted' => '3' }])
+      count_data = { 'total' => '10', 'non_reverted' => '7', 'reverted' => '3' }
+      count_result = instance_double(PG::Result, to_a: [count_data])
+      allow(count_result).to receive(:[]).with(0).and_return(count_data)
       allow(mock_conn).to receive(:exec_params).and_return(count_result)
 
       synchronizer.send(:process_category, category)

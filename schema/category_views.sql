@@ -13,24 +13,30 @@ DROP MATERIALIZED VIEW IF EXISTS mv_monthly_category_stats CASCADE;
 -- View: Category statistics across all repositories
 CREATE VIEW v_category_stats AS
 SELECT
-    category,
+    c.category,
+    cat.weight AS category_weight,
     COUNT(*) AS total_commits,
-    COUNT(DISTINCT author_email) AS unique_authors,
-    COUNT(DISTINCT repository_id) AS repositories,
-    SUM(lines_added) AS total_lines_added,
-    SUM(lines_deleted) AS total_lines_deleted,
-    SUM(lines_added + lines_deleted) AS total_lines_changed,
+    COUNT(DISTINCT c.author_email) AS unique_authors,
+    COUNT(DISTINCT c.repository_id) AS repositories,
+    SUM(c.lines_added) AS total_lines_added,
+    SUM(c.lines_deleted) AS total_lines_deleted,
+    SUM(c.lines_added + c.lines_deleted) AS total_lines_changed,
     -- Weighted metrics (accounting for reverted commits)
-    ROUND(SUM(lines_added * weight / 100.0)::numeric, 2) AS weighted_lines_added,
-    ROUND(SUM(lines_deleted * weight / 100.0)::numeric, 2) AS weighted_lines_deleted,
-    ROUND(SUM((lines_added + lines_deleted) * weight / 100.0)::numeric, 2) AS weighted_lines_changed,
+    ROUND(SUM(c.lines_added * c.weight / 100.0)::numeric, 2) AS weighted_lines_added,
+    ROUND(SUM(c.lines_deleted * c.weight / 100.0)::numeric, 2) AS weighted_lines_deleted,
+    ROUND(SUM((c.lines_added + c.lines_deleted) * c.weight / 100.0)::numeric, 2) AS weighted_lines_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(c.weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(c.weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(c.weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     -- Averages
-    ROUND(AVG(lines_added + lines_deleted)::numeric, 1) AS avg_lines_per_commit,
-    MIN(commit_date) AS first_commit,
-    MAX(commit_date) AS latest_commit
-FROM commits
-WHERE category IS NOT NULL AND weight > 0
-GROUP BY category
+    ROUND(AVG(c.lines_added + c.lines_deleted)::numeric, 1) AS avg_lines_per_commit,
+    MIN(c.commit_date) AS first_commit,
+    MAX(c.commit_date) AS latest_commit
+FROM commits c
+LEFT JOIN categories cat ON c.category = cat.name
+WHERE c.category IS NOT NULL AND c.weight > 0
+GROUP BY c.category, cat.weight
 ORDER BY total_commits DESC;
 
 COMMENT ON VIEW v_category_stats IS 'Aggregate statistics for each category across all repositories (excludes reverted commits with weight=0)';
@@ -41,6 +47,7 @@ SELECT
     r.id AS repository_id,
     r.name AS repository_name,
     c.category,
+    cat.weight AS category_weight,
     COUNT(*) AS total_commits,
     COUNT(DISTINCT c.author_email) AS unique_authors,
     SUM(c.lines_added) AS total_lines_added,
@@ -50,12 +57,17 @@ SELECT
     ROUND(SUM(c.lines_added * c.weight / 100.0)::numeric, 2) AS weighted_lines_added,
     ROUND(SUM(c.lines_deleted * c.weight / 100.0)::numeric, 2) AS weighted_lines_deleted,
     ROUND(SUM((c.lines_added + c.lines_deleted) * c.weight / 100.0)::numeric, 2) AS weighted_lines_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(c.weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(c.weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(c.weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     -- Averages
     ROUND(AVG(c.lines_added + c.lines_deleted)::numeric, 1) AS avg_lines_per_commit
 FROM commits c
 JOIN repositories r ON c.repository_id = r.id
+LEFT JOIN categories cat ON c.category = cat.name
 WHERE c.category IS NOT NULL AND c.weight > 0
-GROUP BY r.id, r.name, c.category
+GROUP BY r.id, r.name, c.category, cat.weight
 ORDER BY r.name, total_commits DESC;
 
 COMMENT ON VIEW v_category_by_repo IS 'Category statistics grouped by repository (excludes reverted commits with weight=0)';
@@ -68,6 +80,7 @@ SELECT
     DATE_TRUNC('month', c.commit_date)::DATE AS month_start_date,
     TO_CHAR(c.commit_date, 'YYYY-MM') AS year_month,
     c.category,
+    cat.weight AS category_weight,
     COUNT(*) AS total_commits,
     COUNT(DISTINCT c.author_email) AS unique_authors,
     SUM(c.lines_added) AS total_lines_added,
@@ -77,12 +90,17 @@ SELECT
     ROUND(SUM(c.lines_added * c.weight / 100.0)::numeric, 2) AS weighted_lines_added,
     ROUND(SUM(c.lines_deleted * c.weight / 100.0)::numeric, 2) AS weighted_lines_deleted,
     ROUND(SUM((c.lines_added + c.lines_deleted) * c.weight / 100.0)::numeric, 2) AS weighted_lines_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(c.weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(c.weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(c.weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     -- Averages
     ROUND(AVG(c.lines_added + c.lines_deleted)::numeric, 1) AS avg_lines_per_commit
 FROM commits c
 JOIN repositories r ON c.repository_id = r.id
+LEFT JOIN categories cat ON c.category = cat.name
 WHERE c.category IS NOT NULL AND c.weight > 0
-GROUP BY r.id, r.name, DATE_TRUNC('month', c.commit_date), TO_CHAR(c.commit_date, 'YYYY-MM'), c.category
+GROUP BY r.id, r.name, DATE_TRUNC('month', c.commit_date), TO_CHAR(c.commit_date, 'YYYY-MM'), c.category, cat.weight
 ORDER BY r.name, month_start_date DESC, total_commits DESC;
 
 CREATE INDEX idx_mv_monthly_category_repo ON mv_monthly_category_stats(repository_id, month_start_date);

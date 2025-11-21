@@ -50,6 +50,10 @@ SELECT
     ROUND(SUM(c.lines_deleted * c.weight / 100.0)::numeric, 2) AS weighted_lines_deleted,
     ROUND(SUM((c.lines_added + c.lines_deleted) * c.weight / 100.0)::numeric, 2) AS weighted_lines_changed,
     ROUND(SUM(c.files_changed * c.weight / 100.0)::numeric, 2) AS weighted_files_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(c.weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(c.weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(c.weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     -- Averages
     ROUND(AVG(c.lines_added + c.lines_deleted), 2) AS avg_lines_changed_per_commit,
     ROUND(AVG(c.lines_added), 2) AS avg_lines_added_per_commit,
@@ -82,6 +86,10 @@ SELECT
     ROUND(SUM(c.lines_deleted * c.weight / 100.0)::numeric, 2) AS weighted_lines_deleted,
     ROUND(SUM((c.lines_added + c.lines_deleted) * c.weight / 100.0)::numeric, 2) AS weighted_lines_changed,
     ROUND(SUM(c.files_changed * c.weight / 100.0)::numeric, 2) AS weighted_files_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(c.weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(c.weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(c.weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     -- Averages
     ROUND(AVG(c.lines_added + c.lines_deleted), 2) AS avg_lines_changed_per_commit,
     ROUND(AVG(c.lines_added), 2) AS avg_lines_added_per_commit,
@@ -114,6 +122,10 @@ SELECT
     ROUND(SUM(c.lines_deleted * c.weight / 100.0)::numeric, 2) AS weighted_lines_deleted,
     ROUND(SUM((c.lines_added + c.lines_deleted) * c.weight / 100.0)::numeric, 2) AS weighted_lines_changed,
     ROUND(SUM(c.files_changed * c.weight / 100.0)::numeric, 2) AS weighted_files_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(c.weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(c.weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(c.weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     -- Averages
     ROUND(AVG(c.lines_added + c.lines_deleted), 2) AS avg_lines_changed_per_commit,
     ROUND(AVG(c.lines_added), 2) AS avg_lines_added_per_commit,
@@ -150,6 +162,10 @@ SELECT
     ROUND(SUM(c.lines_added * c.weight / 100.0)::numeric, 2) AS weighted_lines_added,
     ROUND(SUM(c.lines_deleted * c.weight / 100.0)::numeric, 2) AS weighted_lines_deleted,
     ROUND(SUM((c.lines_added + c.lines_deleted) * c.weight / 100.0)::numeric, 2) AS weighted_lines_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(c.weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(c.weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(c.weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     -- Averages
     ROUND(AVG(c.lines_added + c.lines_deleted), 2) AS avg_lines_changed_per_commit,
     ROUND(AVG(c.lines_added), 2) AS avg_lines_added_per_commit,
@@ -187,6 +203,10 @@ SELECT
     SUM(lines_deleted) AS total_lines_deleted,
     SUM(lines_added + lines_deleted) AS total_lines_changed,
     ROUND(SUM((lines_added + lines_deleted) * weight / 100.0)::numeric, 2) AS weighted_lines_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     ROUND(AVG(lines_added + lines_deleted), 2) AS avg_lines_per_commit,
     MIN(commit_date) AS first_usage,
     MAX(commit_date) AS latest_usage
@@ -206,6 +226,10 @@ SELECT
     COUNT(DISTINCT c.author_email) AS unique_authors,
     SUM(c.lines_added + c.lines_deleted) AS total_lines_changed,
     ROUND(SUM((c.lines_added + c.lines_deleted) * c.weight / 100.0)::numeric, 2) AS weighted_lines_changed,
+    -- Weight analysis metrics
+    ROUND(SUM(c.weight / 100.0)::numeric, 2) AS effective_commits,
+    ROUND(AVG(c.weight)::numeric, 1) AS avg_weight,
+    ROUND(SUM(c.weight / 100.0) / COUNT(*)::numeric * 100, 1) AS weight_efficiency_pct,
     ROUND(AVG(c.lines_added + c.lines_deleted), 2) AS avg_lines_per_commit
 FROM commits c
 JOIN repositories r ON c.repository_id = r.id

@@ -37,8 +37,8 @@ RSpec.describe LLM::Categorizer do
 
   describe '#save_category' do
     it 'inserts new category into database' do
-      allow(mock_conn).to receive(:exec_params)
-      allow(mock_conn).to receive(:cmd_tuples).and_return(1)
+      mock_result = instance_double(PG::Result, cmd_tuples: 1)
+      allow(mock_conn).to receive(:exec_params).and_return(mock_result)
 
       result = categorizer.save_category('NEW_CATEGORY', description: 'Test category')
 
@@ -47,8 +47,8 @@ RSpec.describe LLM::Categorizer do
     end
 
     it 'does not increment counter if category already exists' do
-      allow(mock_conn).to receive(:exec_params)
-      allow(mock_conn).to receive(:cmd_tuples).and_return(0)
+      mock_result = instance_double(PG::Result, cmd_tuples: 0)
+      allow(mock_conn).to receive(:exec_params).and_return(mock_result)
 
       result = categorizer.save_category('EXISTING')
 
@@ -138,17 +138,20 @@ RSpec.describe LLM::Categorizer do
     before do
       # Mock database operations
       allow(mock_conn).to receive(:transaction).and_yield
-      allow(mock_conn).to receive(:exec_params)
-      allow(mock_conn).to receive(:cmd_tuples).and_return(1)
 
-      # Mock LLM responses
-      allow(mock_client).to receive(:categorize).and_return(
-        { category: 'BILLING', confidence: 90, reason: 'Billing service changes' }
-      ).once
+      # Mock fetching existing categories - return array directly for .map
+      mock_categories_result = []
+      allow(mock_conn).to receive(:exec).with('SELECT name FROM categories ORDER BY usage_count DESC, name ASC').and_return(mock_categories_result)
 
+      # Mock result for category insert (cmd_tuples = 1 means new category created)
+      mock_result = instance_double(PG::Result, cmd_tuples: 1)
+      allow(mock_conn).to receive(:exec_params).and_return(mock_result)
+
+      # Mock LLM responses - return sequence of values
       allow(mock_client).to receive(:categorize).and_return(
+        { category: 'BILLING', confidence: 90, reason: 'Billing service changes' },
         { category: 'DOCS', confidence: 85, reason: 'Documentation update' }
-      ).once
+      )
     end
 
     it 'categorizes all commits' do

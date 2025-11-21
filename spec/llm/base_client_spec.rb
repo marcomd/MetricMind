@@ -68,9 +68,9 @@ RSpec.describe LLM::BaseClient do
         expect(client.send(:valid_category?, long_category)).to be false
       end
 
-      it 'rejects categories starting with numbers' do
-        expect(client.send(:valid_category?, '2FA')).to be false
-        expect(client.send(:valid_category?, '123')).to be false
+      it 'accepts technical terms starting with numbers' do
+        expect(client.send(:valid_category?, '2FA')).to be true
+        expect(client.send(:valid_category?, '3D')).to be true
       end
 
       it 'rejects categories starting with special characters' do
