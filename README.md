@@ -413,22 +413,58 @@ Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_eff
 **`v_reverted_commits`**
 Commits with weight=0 (reverted commits) for quality analysis.
 
+#### Personal Performance Views
+
+These views enable personal metrics for logged-in users by filtering on `author_email`.
+
+**`v_daily_stats_by_author`**
+Daily aggregated statistics per author and repository. Filter by `author_email` to show personal daily activity.
+Includes same metrics as `v_daily_stats_by_repo` but grouped by author.
+
+**`v_weekly_stats_by_author`**
+Weekly aggregated statistics per author and repository. Filter by `author_email` to show personal weekly trends.
+Includes same metrics as `v_weekly_stats_by_repo` but grouped by author.
+
+**`mv_monthly_stats_by_author` (Materialized)**
+Pre-computed monthly statistics per author and repository for fast queries. Filter by `author_email` to show personal monthly trends.
+Includes same metrics as `mv_monthly_stats_by_repo` but grouped by author.
+
+**`v_category_stats_by_author`**
+Category statistics per author across all repositories. Filter by `author_email` to show personal category breakdown.
+Shows which business domains the user is working on.
+
+**`v_category_by_author_and_repo`**
+Category statistics per author per repository. Filter by `author_email` to show personal category work by repository.
+
+**`mv_monthly_category_stats_by_author` (Materialized)**
+Monthly category trends per author. Filter by `author_email` to show how personal work distribution changes over time.
+
+**`v_personal_commit_details`**
+Detailed commit information optimized for personal queries. Filter by `author_email` to show commit history for logged-in users.
+Includes: hash, subject, commit_date, lines_added/deleted/changed, files_changed, weight, category, ai_confidence, ai_tools, repository information.
+Useful for displaying commit lists, filtering by date range, repository, or category.
+
 ### Refreshing Materialized Views
 
 After loading new data, refresh materialized views:
 
 ```sql
--- Refresh all standard materialized views
+-- Refresh all standard materialized views (includes personal trends)
 SELECT refresh_all_mv();
 
--- Refresh all category materialized views
+-- Refresh all category materialized views (includes personal categories)
 SELECT refresh_category_mv();
+
+-- Refresh only personal performance views
+SELECT refresh_personal_mv();
 ```
 
 Or manually:
 ```sql
 REFRESH MATERIALIZED VIEW mv_monthly_stats_by_repo;
+REFRESH MATERIALIZED VIEW mv_monthly_stats_by_author;
 REFRESH MATERIALIZED VIEW mv_monthly_category_stats;
+REFRESH MATERIALIZED VIEW mv_monthly_category_stats_by_author;
 ```
 
 **Note:** When using `./scripts/run.rb`, materialized views are refreshed automatically.
@@ -571,6 +607,101 @@ FROM mv_monthly_stats_by_repo
 GROUP BY repository_name
 HAVING AVG(weight_efficiency_pct) < 100
 ORDER BY discounted_commits DESC;
+```
+
+### Personal performance (for logged-in users)
+
+Query personal metrics using the logged-in user's email address:
+
+```sql
+-- Personal commit history (most recent commits)
+SELECT
+    commit_date,
+    repository_name,
+    hash,
+    subject,
+    lines_changed,
+    weight,
+    category,
+    ai_tools
+FROM v_personal_commit_details
+WHERE author_email = 'user@example.com'
+ORDER BY commit_date DESC
+LIMIT 50;
+
+-- Personal commits with filtering (specific repository and date range)
+SELECT
+    commit_date,
+    repository_name,
+    subject,
+    lines_changed,
+    category
+FROM v_personal_commit_details
+WHERE author_email = 'user@example.com'
+  AND repository_name = 'backend-api'
+  AND commit_date >= '2025-01-01'
+ORDER BY commit_date DESC;
+
+-- Personal commits by category (e.g., all BILLING commits)
+SELECT
+    commit_date,
+    repository_name,
+    subject,
+    lines_changed,
+    weight
+FROM v_personal_commit_details
+WHERE author_email = 'user@example.com'
+  AND category = 'BILLING'
+ORDER BY commit_date DESC;
+
+-- Personal monthly trends
+SELECT
+    year_month,
+    repository_name,
+    total_commits,
+    total_lines_changed,
+    effective_commits,
+    avg_weight,
+    weight_efficiency_pct
+FROM mv_monthly_stats_by_author
+WHERE author_email = 'user@example.com'
+ORDER BY month_start_date DESC;
+
+-- Personal daily activity (last 30 days)
+SELECT
+    commit_date,
+    repository_name,
+    total_commits,
+    total_lines_changed,
+    weighted_lines_changed
+FROM v_daily_stats_by_author
+WHERE author_email = 'user@example.com'
+  AND commit_date >= CURRENT_DATE - INTERVAL '30 days'
+ORDER BY commit_date DESC;
+
+-- Personal category breakdown
+SELECT
+    category,
+    total_commits,
+    effective_commits,
+    weighted_lines_changed,
+    weight_efficiency_pct,
+    repositories
+FROM v_category_stats_by_author
+WHERE author_email = 'user@example.com'
+ORDER BY total_commits DESC;
+
+-- Personal category trends over time
+SELECT
+    year_month,
+    category,
+    total_commits,
+    weighted_lines_changed,
+    avg_lines_per_commit
+FROM mv_monthly_category_stats_by_author
+WHERE author_email = 'user@example.com'
+ORDER BY month_start_date DESC, total_commits DESC
+LIMIT 20;
 ```
 
 ## Data Format

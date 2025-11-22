@@ -47,11 +47,22 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
   - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`
 - AI Tools: `v_ai_tools_stats`, `v_ai_tools_by_repo`
   - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`
+- Personal Performance: `v_daily_stats_by_author`, `v_weekly_stats_by_author`, `mv_monthly_stats_by_author` (materialized)
+  - Include: Same metrics as standard views, but grouped by author_email
+  - Filter by `author_email` to show personal metrics for logged-in users
+- Personal Categories: `v_category_stats_by_author`, `v_category_by_author_and_repo`, `mv_monthly_category_stats_by_author` (materialized)
+  - Include: Same metrics as category views, but grouped by author_email
+  - Filter by `author_email` to show personal category breakdown
+- Personal Commits: `v_personal_commit_details`
+  - Detailed commit list view optimized for personal queries
+  - Includes: hash, subject, date, lines, weight, category, ai_tools, repository
+  - Filter by `author_email` for commit history of logged-in users
 - Uncategorized: `v_uncategorized_commits` (for monitoring coverage)
 
 **Important**: Materialized views must be refreshed after loading data:
-- `SELECT refresh_all_mv();` - Standard views
-- `SELECT refresh_category_mv();` - Category views
+- `SELECT refresh_all_mv();` - Standard and personal trend views
+- `SELECT refresh_category_mv();` - Category and personal category views
+- `SELECT refresh_personal_mv();` - All personal performance views
 
 ### Orchestration Scripts
 
@@ -178,7 +189,7 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 psql -d git_analytics
 
 # Refresh materialized views
-psql -d git_analytics -c "SELECT refresh_all_mv(); SELECT refresh_category_mv();"
+psql -d git_analytics -c "SELECT refresh_all_mv(); SELECT refresh_category_mv(); SELECT refresh_personal_mv();"
 
 # Check categorization coverage
 psql -d git_analytics -c "
@@ -246,6 +257,52 @@ psql -d git_analytics -c "
   FROM v_category_stats
   WHERE category_weight < 100
   ORDER BY total_commits DESC;
+"
+
+# Personal performance queries (for logged-in users)
+# View personal commit history (recent commits)
+psql -d git_analytics -c "
+  SELECT commit_date, repository_name, hash, subject, lines_changed,
+         weight, category, ai_tools
+  FROM v_personal_commit_details
+  WHERE author_email = 'user@example.com'
+  ORDER BY commit_date DESC
+  LIMIT 50;
+"
+
+# View personal monthly trends
+psql -d git_analytics -c "
+  SELECT year_month, repository_name, total_commits, total_lines_changed,
+         effective_commits, avg_weight, weight_efficiency_pct
+  FROM mv_monthly_stats_by_author
+  WHERE author_email = 'user@example.com'
+  ORDER BY month_start_date DESC;
+"
+
+# View personal daily activity
+psql -d git_analytics -c "
+  SELECT commit_date, repository_name, total_commits, total_lines_changed
+  FROM v_daily_stats_by_author
+  WHERE author_email = 'user@example.com' AND commit_date >= CURRENT_DATE - INTERVAL '30 days'
+  ORDER BY commit_date DESC;
+"
+
+# View personal category breakdown
+psql -d git_analytics -c "
+  SELECT category, total_commits, effective_commits, weighted_lines_changed,
+         weight_efficiency_pct
+  FROM v_category_stats_by_author
+  WHERE author_email = 'user@example.com'
+  ORDER BY total_commits DESC;
+"
+
+# View personal category trends over time
+psql -d git_analytics -c "
+  SELECT year_month, category, total_commits, weighted_lines_changed
+  FROM mv_monthly_category_stats_by_author
+  WHERE author_email = 'user@example.com'
+  ORDER BY month_start_date DESC, total_commits DESC
+  LIMIT 20;
 "
 ```
 
@@ -338,6 +395,7 @@ OLLAMA_TEMPERATURE=0.1
 - `003_add_weight_and_ai_tools.sql` - Adds weight and ai_tools columns
 - `004_add_ai_categorization.sql` - Adds categories table and ai_confidence column
 - `005_add_category_weight.sql` - Adds weight column to categories table
+- `006_add_personal_performance_views.sql` - Adds personal performance views for logged-in users
 
 **Adding new migrations:**
 - Name format: `NNN_description.sql` (e.g., `002_add_new_feature.sql`)

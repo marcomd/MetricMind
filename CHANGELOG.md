@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2025-11-22
+
+### Added
+- **Personal performance views for logged-in users**:
+  - `v_personal_commit_details` - Detailed commit list view optimized for personal queries
+  - `v_daily_stats_by_author` - Daily statistics per author and repository
+  - `v_weekly_stats_by_author` - Weekly statistics per author and repository
+  - `mv_monthly_stats_by_author` - Monthly statistics per author (materialized for performance)
+  - `v_category_stats_by_author` - Category breakdown per author across all repositories
+  - `v_category_by_author_and_repo` - Category statistics per author per repository
+  - `mv_monthly_category_stats_by_author` - Monthly category trends per author (materialized)
+- **Personal performance indexes** for query optimization:
+  - `idx_commits_author_email` - Index on author_email for fast filtering
+  - `idx_commits_author_date` - Composite index on author_email and commit_date
+  - `idx_commits_author_repo` - Composite index on author_email and repository_id
+  - `idx_commits_author_category` - Composite index on author_email and category
+- **Refresh functions for personal views**:
+  - `refresh_personal_mv()` - Refreshes all personal performance materialized views
+  - Updated `refresh_all_mv()` to include personal trend views
+  - Updated `refresh_category_mv()` to include personal category views
+- **Migration 006** (`006_add_personal_performance_views.sql`):
+  - Adds all personal performance views and indexes
+  - Idempotent script with proper DROP statements for views and indexes
+- **Comprehensive documentation**:
+  - README.md: Added "Personal Performance Views" section with usage examples
+  - README.md: Added personal query examples (commit history, trends, categories)
+  - CLAUDE.md: Updated database schema with personal views documentation
+  - CLAUDE.md: Added personal performance query examples in Database Operations
+
+### Changed
+- **Enhanced view structure** with explicit type casts (`::int`, `::bigint`, `::numeric`)
+- **UNCATEGORIZED handling** in category views using `COALESCE(c.category, 'UNCATEGORIZED')`
+- **View definitions** now use `NULLIF` to prevent division by zero in calculations
+- **All personal views** include comprehensive weight analysis metrics:
+  - `effective_commits` - Weighted commit count accounting for reverts and category weights
+  - `avg_weight` - Average weight across commits
+  - `weight_efficiency_pct` - Efficiency percentage showing weight impact
+
+### Notes
+- **Dashboard integration ready**: Personal views enable individual user metrics on Trends, Activity, and Content pages
+- **Filter by author_email**: All personal views are optimized for filtering by logged-in user's email
+- **Materialized views**: Monthly aggregations provide fast query performance for personal dashboards
+- **Backward compatible**: Existing views and queries continue to work unchanged
+- **Performance optimized**: Comprehensive indexing ensures fast personal queries even with large datasets
+- **Flexible filtering**: Personal views support filtering by repository, date range, and category
+
+### Migration Required
+After updating, apply the migration and refresh materialized views:
+```bash
+# Apply migration
+./scripts/setup.rb --database-only
+
+# Or apply directly
+psql -d git_analytics -f schema/personal_views.sql
+
+# Refresh personal materialized views
+psql -d git_analytics -c "SELECT refresh_personal_mv();"
+```
+
+Or run the full pipeline:
+```bash
+./scripts/run.rb
+```
+
 ## [1.2.0] - 2025-11-20
 
 ### Added

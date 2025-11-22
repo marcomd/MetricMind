@@ -48,3 +48,6 @@ Thumbs.db
 
 # Config
 /config/repositories.json
+
+# AI Tools
+.claude/settings.local.json
