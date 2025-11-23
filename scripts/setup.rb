@@ -9,6 +9,9 @@ require 'dotenv/load' rescue nil
 require 'optparse'
 require 'fileutils'
 require 'shellwords'
+require 'uri'
+require 'sequel'
+require_relative '../lib/sequel_connection'
 
 # Main setup script for Git Productivity Analytics
 class SetupScript
@@ -296,32 +299,88 @@ class SetupScript
   end
 
   def initialize_production_schema
-    # Check if schema already exists
-    tables_exist = tables_exist?(@db_info[:name])
+    # Auto-seed if schema exists but migrations not tracked
+    seed_base_schema_migrations_if_needed(@db_info[:name])
 
-    if tables_exist
-      puts "#{BLUE}  Schema already exists, updating...#{NC}"
-      update_existing_schema(@db_info[:name])
-    else
-      puts '  Initializing production database schema...'
-      create_fresh_schema(@db_info[:name], 'Production')
-    end
+    # Run all migrations (new unified approach)
+    puts '  Applying database migrations...'
+    apply_migrations(@db_info[:name], ignore_errors: false)
+    puts "#{GREEN}✓ Production schema initialized#{NC}"
   end
 
   def initialize_test_schema
-    puts '  Initializing test database schema...'
-    create_fresh_schema(@db_info[:test_name], 'Test')
-    apply_migrations_to_test
+    # Auto-seed if schema exists but migrations not tracked
+    seed_base_schema_migrations_if_needed(@db_info[:test_name])
+
+    # Run all migrations
+    puts '  Applying migrations to test database...'
+    apply_migrations(@db_info[:test_name], ignore_errors: false)
+    puts "#{GREEN}✓ Test schema initialized#{NC}"
   end
 
-  def update_existing_schema(db_name)
-    # Apply migrations (ignoring already-applied ones)
-    puts '  Applying migrations...'
-    apply_migrations(db_name, ignore_errors: true)
+  def seed_base_schema_migrations_if_needed(db_name)
+    # Detect if this is an existing database from SQL files that needs seeding
+    return unless should_seed_migrations?(db_name)
 
-    # Recreate views
-    puts '  Recreating views...'
-    recreate_views(db_name)
+    puts "#{YELLOW}  Detected existing schema from SQL files#{NC}"
+    puts "  Seeding schema_migrations table to prevent re-execution..."
+
+    # Seeds for base schema files that were converted to migrations
+    seeds = [
+      '20251107000000_create_base_schema.rb',
+      '20251112080000_create_standard_views.rb',
+      '20251116000000_create_category_views.rb',
+      '20251122000000_create_personal_views.rb'
+    ]
+
+    begin
+      db = Sequel.connect(build_connection_string(db_name))
+
+      # Ensure schema_migrations table exists
+      unless db.table_exists?(:schema_migrations)
+        db.create_table?(:schema_migrations) do
+          String :filename, primary_key: true
+        end
+      end
+
+      # Insert seed records
+      seeds.each do |filename|
+        next if db[:schema_migrations].where(filename: filename).count > 0
+
+        db[:schema_migrations].insert(filename: filename)
+        puts "    #{GREEN}✓ Seeded: #{filename}#{NC}"
+      end
+
+      puts "#{GREEN}✓ Schema migrations seeded successfully#{NC}"
+    rescue StandardError => e
+      puts "#{RED}✗ Failed to seed migrations: #{e.message}#{NC}"
+      exit(1)
+    ensure
+      db.disconnect if db
+    end
+  end
+
+  def should_seed_migrations?(db_name)
+    # Check if:
+    # 1. Core tables exist (schema was created from SQL files)
+    # 2. schema_migrations table is empty or missing (migrations not tracked)
+
+    return false unless tables_exist?(db_name)
+
+    begin
+      db = Sequel.connect(build_connection_string(db_name))
+
+      # If schema_migrations doesn't exist, we need seeding
+      return true unless db.table_exists?(:schema_migrations)
+
+      # If schema_migrations exists but is empty, we need seeding
+      migration_count = db[:schema_migrations].count
+      return migration_count.zero?
+    rescue StandardError
+      false
+    ensure
+      db.disconnect if db
+    end
   end
 
   def create_fresh_schema(db_name, label)
@@ -354,12 +413,69 @@ class SetupScript
       puts "#{RED}✗ Failed to create category views#{NC}"
       exit(1)
     end
+
+    personal_views_file = File.join(@schema_dir, 'personal_views.sql')
+    if execute_sql_file(db_name, personal_views_file)
+      puts "#{GREEN}✓ #{label} personal performance views created#{NC}"
+    else
+      puts "#{RED}✗ Failed to create personal performance views#{NC}"
+      exit(1)
+    end
   end
 
   def apply_migrations(db_name, ignore_errors: false)
     return unless Dir.exist?(@migrations_dir)
 
-    migrations = Dir.glob(File.join(@migrations_dir, '*.sql')).sort
+    # Check if we have Sequel migrations (.rb) or old SQL migrations (.sql)
+    rb_migrations = Dir.glob(File.join(@migrations_dir, '*.rb')).sort
+    sql_migrations = Dir.glob(File.join(@migrations_dir, '*.sql')).sort
+
+    if rb_migrations.any?
+      # Use Sequel migration framework
+      apply_sequel_migrations(db_name, ignore_errors)
+    elsif sql_migrations.any?
+      # Fallback to old SQL migration approach
+      apply_sql_migrations(db_name, sql_migrations, ignore_errors)
+    else
+      puts "    #{YELLOW}⚠ No migrations found#{NC}"
+    end
+  end
+
+  def apply_sequel_migrations(db_name, ignore_errors)
+    puts "    - Using Sequel migration framework..."
+
+    begin
+      # Connect to the specific database
+      db = Sequel.connect(build_connection_string(db_name))
+
+      # Enable migration extension
+      Sequel.extension :migration
+
+      # Run migrations
+      Sequel::Migrator.run(db, @migrations_dir, allow_missing_migration_files: true)
+
+      puts "    #{GREEN}✓ All Sequel migrations applied#{NC}"
+    rescue Sequel::Migrator::Error => e
+      if ignore_errors
+        puts "    #{YELLOW}○ Migrations skipped or already applied#{NC}"
+      else
+        puts "    #{RED}✗ Migration failed: #{e.message}#{NC}"
+        exit(1)
+      end
+    rescue StandardError => e
+      if ignore_errors
+        puts "    #{YELLOW}○ Error applying migrations (ignored): #{e.message}#{NC}"
+      else
+        puts "    #{RED}✗ Unexpected error: #{e.message}#{NC}"
+        exit(1)
+      end
+    ensure
+      db.disconnect if db
+    end
+  end
+
+  def apply_sql_migrations(db_name, migrations, ignore_errors)
+    puts "    - Using legacy SQL migrations..."
 
     migrations.each do |migration|
       migration_name = File.basename(migration)
@@ -376,20 +492,31 @@ class SetupScript
     end
   end
 
+  def build_connection_string(db_name)
+    if ENV['DATABASE_URL']
+      # Replace database name in URL
+      uri = URI.parse(ENV['DATABASE_URL'])
+      uri.path = "/#{db_name}"
+      uri.to_s
+    else
+      # Build connection string from individual params
+      host = ENV['PGHOST'] || 'localhost'
+      port = ENV['PGPORT'] || 5432
+      user = ENV['PGUSER'] || ENV['USER']
+      password = ENV['PGPASSWORD']
+
+      password_part = password ? ":#{password}" : ''
+      "postgresql://#{user}#{password_part}@#{host}:#{port}/#{db_name}"
+    end
+  end
+
   def apply_migrations_to_test
     return unless Dir.exist?(@migrations_dir)
 
     puts '  Applying migrations to test database...'
-    migrations = Dir.glob(File.join(@migrations_dir, '*.sql')).sort
 
-    migrations.each do |migration|
-      migration_name = File.basename(migration)
-      if execute_sql_file(@db_info[:test_name], migration, silent: true)
-        puts "    #{GREEN}✓ #{migration_name}#{NC}"
-      else
-        puts "    #{YELLOW}⚠ Warning: #{migration_name} failed on test DB#{NC}"
-      end
-    end
+    # Use the same migration logic as production, with ignore_errors: true for test
+    apply_migrations(@db_info[:test_name], ignore_errors: true)
   end
 
   def recreate_views(db_name)
@@ -405,6 +532,13 @@ class SetupScript
       puts "#{GREEN}✓ Category views updated#{NC}"
     else
       puts "#{YELLOW}⚠ Warning: Some category views may have failed#{NC}"
+    end
+
+    personal_views_file = File.join(@schema_dir, 'personal_views.sql')
+    if execute_sql_file(db_name, personal_views_file, silent: true)
+      puts "#{GREEN}✓ Personal performance views updated#{NC}"
+    else
+      puts "#{YELLOW}⚠ Warning: Some personal performance views may have failed#{NC}"
     end
   end
 

@@ -5,6 +5,100 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2025-11-23
+
+### Added
+- **Unified Sequel-based migration system**:
+  - Replaced manual SQL file management with Rails-like migration framework
+  - `schema_migrations` table for tracking applied migrations
+  - Timestamp-based migration naming: `YYYYMMDDHHMMSS_description.rb`
+  - Full idempotent migration support with `up` and `down` blocks
+- **Migration management scripts**:
+  - `scripts/db_migrate.rb` - Apply pending migrations
+  - `scripts/db_migrate_status.rb` - Check migration status (applied/pending)
+  - `scripts/db_rollback.rb` - Rollback last N migrations with confirmation
+  - `scripts/db_migrate_new.rb` - Generate new migration templates
+  - `scripts/rename_migrations.rb` - Convert numbered to timestamp-based migrations
+- **Auto-seeding for existing databases**:
+  - Automatic detection of databases created from legacy SQL files
+  - Seeds `schema_migrations` table to prevent re-execution of converted migrations
+  - Seamless migration from SQL-based to migration-based schema management
+- **New unified migrations** (converted from SQL files):
+  - `20251107000000_create_base_schema.rb` - Base tables (repositories, commits)
+  - `20251112080000_create_standard_views.rb` - Standard analytics views
+  - `20251116000000_create_category_views.rb` - Category analytics views
+  - `20251122000000_create_personal_views.rb` - Personal performance views
+- **Sequel connection wrapper** (`lib/sequel_connection.rb`):
+  - Unified database connection for migration system
+  - Reuses existing DBConnection configuration
+  - Supports both DATABASE_URL and individual parameters
+- **Legacy SQL file archive** (`schema/legacy_sql_files/`):
+  - Preserved original SQL files for reference
+  - Comprehensive README explaining migration to new system
+  - Clear documentation on why files are archived
+
+### Changed
+- **Schema management workflow completely redesigned**:
+  - All schema changes now managed through Sequel migrations
+  - Single source of truth: `schema/migrations/` directory
+  - Migration order enforced by timestamps (view dependencies handled correctly)
+- **Enhanced `scripts/setup.rb`**:
+  - Auto-seeding integration for existing databases
+  - Simplified schema initialization (removed manual SQL file execution)
+  - Unified migration application workflow
+- **Migration file format standardized**:
+  - All migrations use Sequel Ruby DSL with `up` and `down` blocks
+  - IF NOT EXISTS / IF EXISTS patterns for idempotency
+  - Clear separation of forward and rollback logic
+- **Updated documentation**:
+  - README.md: New "Database Migrations" section with workflow
+  - README.md: Updated "Database Setup" to reflect auto-seeding
+  - CLAUDE.md: Comprehensive "Schema Migrations" section
+  - CLAUDE.md: Updated architecture to show unified migration-based system
+- **Gemfile**: Added `sequel ~> 5.75` dependency
+
+### Fixed
+- **Migration status script bug** (`db_migrate_status.rb`):
+  - Fixed incorrect comparison logic (was comparing timestamps, now compares full filenames)
+  - Now correctly identifies applied vs pending migrations
+  - Proper handling of `.rb` extension in migration tracking
+
+### Removed
+- Manual SQL file execution from setup workflow
+- Direct `psql` commands for schema updates
+- Numbered migration format (`001_*.sql`)
+
+### Migration Path
+
+**For existing databases:**
+```bash
+# The setup script automatically detects and seeds migrations
+./scripts/setup.rb --database-only
+```
+
+**For new databases:**
+```bash
+# Standard setup applies all migrations in order
+./scripts/setup.rb
+```
+
+**Check migration status:**
+```bash
+./scripts/db_migrate_status.rb
+```
+
+### Notes
+- **Backward compatible**: Existing databases are automatically migrated to the new system
+- **Zero manual intervention**: Auto-seeding prevents re-execution of converted SQL files
+- **Rails-like workflow**: Familiar migration patterns for Ruby developers
+- **Rollback support**: All migrations include reversible `down` blocks
+- **Version tracking**: Sequel's `schema_migrations` table ensures migrations run exactly once
+- **Legacy files preserved**: Original SQL files archived for reference and safety
+- **Dashboard sync**: Document manual schema differences between extractor and dashboard projects
+
+### Breaking Changes
+None. The migration is transparent for existing installations.
+
 ## [1.3.0] - 2025-11-22
 
 ### Added

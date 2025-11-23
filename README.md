@@ -74,12 +74,12 @@ vim config/repositories.json    # Add your repositories
 psql -d git_analytics -c "SELECT * FROM v_category_stats;"
 ```
 
-That's it! The system automatically handles schema setup, migrations, data extraction, commit categorization, weight calculation, and view optimization.
+That's it! The system automatically handles schema setup via migrations, data extraction, commit categorization, weight calculation, and view optimization.
 
 **What happens automatically:**
-- ✅ Database creation and schema initialization
-- ✅ Migration application (weight, ai_tools, category columns)
-- ✅ View creation (standard + category + AI tools analytics)
+- ✅ Database creation and schema initialization via Sequel migrations
+- ✅ Auto-detection and seeding for existing databases from SQL files
+- ✅ All schema managed through unified migration system (tables, views, indexes)
 - ✅ Git data extraction from all repositories (with full commit messages)
 - ✅ AI tools extraction from commit bodies
 - ✅ Commit categorization (business domain extraction)
@@ -156,27 +156,43 @@ cp .env.example .env
 #### 2. Database Setup
 
 ```bash
-# Run database-only setup (creates database, applies schema, migrations, and views)
+# Run database-only setup (creates database and applies all migrations)
 ./scripts/setup.rb --database-only
 ```
 
 This will:
 - Create the database if it doesn't exist
-- Apply the base schema
-- Run all migrations (including category column for business domain tracking)
-- Create standard views and category views
+- Auto-detect existing databases from SQL files and seed schema_migrations table
+- Apply all Sequel migrations in chronological order (tables, columns, views, indexes)
+- All schema changes are managed through the unified migration system
 
 **Note:** This skips Ruby dependencies and .env setup. Use `./scripts/setup.rb` (without flags) for complete first-time setup.
 
-#### 3. Database Migration
+#### 3. Database Migrations
 
-Manually Apply the Migration
+The project uses [Sequel](https://sequel.jeremyevans.net/) for database migrations with version tracking and rollback support.
 
-E.g. `psql -d git_analytics -f schema/migrations/002_add_users_and_oauth.sql`
+```bash
+# Check migration status
+./scripts/db_migrate_status.rb
 
-This will:
-- Create the users table, the indexes etc.
-- Keep all your existing data intact
+# Apply pending migrations
+./scripts/db_migrate.rb
+
+# Create new migration
+./scripts/db_migrate_new.rb add_new_column
+
+# Rollback last migration
+./scripts/db_rollback.rb
+```
+
+**Migration tracking:**
+- Applied migrations are tracked in the `schema_migrations` table
+- Each migration runs only once (idempotent by design)
+- Migrations use timestamp format: `YYYYMMDDHHMMSS_description.rb`
+- Full rollback support via `up` and `down` blocks
+
+See the [Schema Migrations](#schema-migrations) section in CLAUDE.md for detailed documentation.
 
 #### 4. Configure Repositories
 

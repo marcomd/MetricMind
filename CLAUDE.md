@@ -8,6 +8,51 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Key Purpose**: Track **how** developers work (volume, frequency) and **what** they work on (business domains extracted from commit messages).
 
+## Development Practices
+
+### Test-Driven Development (TDD)
+
+**ALWAYS apply TDD when writing or modifying code.** This is a core requirement for all development work.
+
+**The TDD Cycle (Red-Green-Refactor):**
+
+1. **Red**: Write a failing test first
+   - Write a test that demonstrates the bug or describes the new feature
+   - Run the test to confirm it fails (this proves the test is valid)
+   - The failing test serves as a specification for what needs to be implemented
+
+2. **Green**: Write minimal code to make the test pass
+   - Implement only what's needed to make the test pass
+   - Avoid over-engineering or adding extra features
+   - Run the test to confirm it passes
+
+3. **Refactor**: Improve the code while keeping tests green
+   - Clean up the implementation
+   - Remove duplication
+   - Improve readability
+   - Run all tests to ensure no regressions
+
+**Why TDD Matters:**
+
+- **Bug Prevention**: Tests catch regressions before they reach production
+- **Living Documentation**: Tests serve as examples of how code should work
+- **Design Feedback**: Hard-to-test code indicates design problems
+- **Confidence**: Comprehensive test coverage enables safe refactoring
+- **Coverage**: Ensures edge cases are handled (e.g., special characters in inputs)
+
+**Examples:**
+
+- Before fixing a bug: Write a test that reproduces the bug
+- Before adding a feature: Write tests that specify the feature's behavior
+- Before refactoring: Ensure existing tests pass, then refactor while keeping them green
+
+**Test Coverage Requirements:**
+
+- All public methods should have tests
+- Edge cases must be tested (empty inputs, special characters, boundary conditions)
+- Error handling must be tested
+- Integration points must be tested
+
 ## Core Architecture
 
 ### Data Pipeline (ETL Flow)
@@ -384,23 +429,139 @@ OLLAMA_TEMPERATURE=0.1
 
 ## Schema Migrations
 
+**Migration System**: Uses [Sequel](https://sequel.jeremyevans.net/) for Rails-like database migrations with version tracking and rollback support.
+
+### Architecture Overview
+
+**Unified Migration-Based Schema Management:**
+
+The database schema is entirely managed through Sequel migrations in `schema/migrations/`. This includes:
+
+1. **Base Schema** (Migration: `20251107000000_create_base_schema.rb`)
+   - Core table definitions: `repositories`, `commits`
+   - Indexes, constraints, and comments
+   - Applied once via migration system
+
+2. **Standard Views** (Migration: `20251112080000_create_standard_views.rb`)
+   - Team analytics views: daily, weekly, monthly stats
+   - AI tools usage tracking
+   - Materialized views for performance
+   - Helper functions: `refresh_all_mv()`
+
+3. **Category Views** (Migration: `20251116000000_create_category_views.rb`)
+   - Business domain analytics
+   - Category breakdown by repository
+   - Monthly trends (materialized)
+   - Helper function: `refresh_category_mv()`
+
+4. **Personal Performance Views** (Migration: `20251122000000_create_personal_views.rb`)
+   - Author-specific metrics (per-user analytics)
+   - Personal commit details, daily/weekly/monthly trends
+   - Category breakdowns per author
+   - Helper function: `refresh_personal_mv()`
+
+5. **Column Migrations** (Various timestamps)
+   - Evolutionary changes: `category`, `weight`, `ai_tools`, etc.
+   - Applied between view migrations as needed
+
+**Key Benefits:**
+- ✅ **Single source of truth** - All schema in migrations
+- ✅ **Full rollback support** - Can revert any change (tables or views)
+- ✅ **Automatic tracking** - schema_migrations table records all applied migrations
+- ✅ **Version controlled** - Complete audit trail in git
+- ✅ **Team-friendly** - Standard Rails-like workflow
+
+**Important Notes:**
+- Sequel's `schema_migrations` table stores full filenames (e.g., `20251109125729_add_commit_categorization.rb`), not just timestamps like Rails
+- This is standard Sequel behavior and cannot be configured to match Rails
+- **Auto-seeding**: Existing databases from SQL files are automatically detected and seeded to prevent re-execution
+- View updates require new migrations (cannot edit migration files after application)
+
 **Migration workflow:**
-1. Create new migration in `schema/migrations/` (numbered: `001_description.sql`)
-2. Run setup to apply: `./scripts/setup.sh --database-only`
-3. Migrations run automatically on fresh setups
+1. Create new migration: `./scripts/db_migrate_new.rb <description>`
+2. Edit the generated file in `schema/migrations/` (timestamp format: `YYYYMMDDHHMMSS_description.rb`)
+3. Apply migrations: `./scripts/db_migrate.rb`
+4. Check status: `./scripts/db_migrate_status.rb`
 
-**Current migrations:**
-- `001_add_commit_categorization.sql` - Adds `category` column to commits table
-- `002_add_users_and_oauth.sql` - Adds users and OAuth support
-- `003_add_weight_and_ai_tools.sql` - Adds weight and ai_tools columns
-- `004_add_ai_categorization.sql` - Adds categories table and ai_confidence column
-- `005_add_category_weight.sql` - Adds weight column to categories table
-- `006_add_personal_performance_views.sql` - Adds personal performance views for logged-in users
+**Migration Commands:**
+```bash
+# Create new migration
+./scripts/db_migrate_new.rb add_status_to_commits
+./scripts/db_migrate_new.rb create_tags_table
 
-**Adding new migrations:**
-- Name format: `NNN_description.sql` (e.g., `002_add_new_feature.sql`)
-- Include both forward migration and comments
-- Test with `--database-only` before committing
+# Apply pending migrations
+./scripts/db_migrate.rb
+
+# Check migration status
+./scripts/db_migrate_status.rb
+./scripts/db_migrate_status.rb --verbose
+
+# Rollback last migration
+./scripts/db_rollback.rb
+
+# Rollback multiple migrations
+./scripts/db_rollback.rb 3
+
+# Setup (includes migration application)
+./scripts/setup.rb --database-only
+```
+
+**Migration Format:**
+Migrations use Sequel's Ruby DSL with `up` and `down` blocks:
+```ruby
+Sequel.migration do
+  up do
+    run <<-SQL
+      ALTER TABLE commits ADD COLUMN status VARCHAR(50);
+      CREATE INDEX idx_commits_status ON commits(status);
+    SQL
+  end
+
+  down do
+    run <<-SQL
+      DROP INDEX IF EXISTS idx_commits_status;
+      ALTER TABLE commits DROP COLUMN IF EXISTS status;
+    SQL
+  end
+end
+```
+
+**Migration Tracking:**
+- Applied migrations tracked in `schema_migrations` table (auto-created by Sequel)
+- Migrations applied only once (idempotent by design)
+- Version-based system prevents duplicate application
+- Rollback support via `down` blocks
+
+**Converting Old Migrations:**
+Legacy numbered migrations (`001_*.sql`) can be converted to timestamp format:
+```bash
+# Dry run (preview only)
+./scripts/rename_migrations.rb --dry-run
+
+# Convert migrations (creates backup in schema/migrations_backup/)
+./scripts/rename_migrations.rb
+```
+
+**Best Practices:**
+- Always provide both `up` and `down` migrations for rollback support
+- Use `IF NOT EXISTS` and `IF EXISTS` for idempotent SQL operations
+- Test migrations on development before applying to production
+- Review down migration logic carefully (especially for data migrations)
+- Commit migrations to version control after testing
+
+**Current Migrations** (in execution order):
+1. `20251107000000_create_base_schema.rb` - Creates core tables (repositories, commits) with indexes
+2. `20251109125729_add_commit_categorization.rb` - Adds `category` column to commits table
+3. `20251109221637_add_users_and_oauth.rb` - Adds users and OAuth support tables
+4. `20251112075825_add_weight_and_ai_tools.rb` - Adds weight and ai_tools columns
+5. `20251112080000_create_standard_views.rb` - Creates standard analytics views and materialized views
+6. `20251116000000_create_category_views.rb` - Creates category analytics views
+7. `20251116160219_add_ai_categorization.rb` - Adds categories table and ai_confidence column
+8. `20251116185136_add_category_weight.rb` - Adds weight column to categories table
+9. `20251122000000_create_personal_views.rb` - Creates personal performance views and updates helper functions
+
+**Auto-Seeding for Existing Databases:**
+If your database was set up with legacy SQL files, the setup script automatically detects this and seeds migrations 1, 5, 6, and 9 into `schema_migrations` to prevent re-execution.
 
 ## Testing Strategy
 

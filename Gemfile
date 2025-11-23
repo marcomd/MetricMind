@@ -8,6 +8,9 @@ ruby '>= 3.3.0'
 # Database connector for PostgreSQL
 gem 'pg', '~> 1.5'
 
+# Database migration framework
+gem 'sequel', '~> 5.75'
+
 # Environment variable management
 gem 'dotenv', '~> 2.8'
 
