@@ -2,7 +2,7 @@
 
 An AI-driven developer productivity analytics system that extracts, stores, and visualizes git commit data from multiple repositories to measure the impact of development tools and practices.
 
-![Cover](docs/MetricMindCover_ruby.jpg)
+![Cover](assets/MetricMindCover_ruby.jpg)
 
 ## Overview
 

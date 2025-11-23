@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2025-11-23
+
+### Fixed
+- **Extractor bug with pipe characters in commit subjects**:
+  - Fixed critical parsing bug in `git_extract_to_json.rb` where commit subjects containing pipe characters (`|`) were truncated
+  - Example: Subject `"Revert \"CS | Move HTML content...\""` was incorrectly extracted as `"Revert \"CS "`
+  - Root cause: Naive `split('|')` operation split on all pipes, including those within the subject text
+  - Solution: Changed parsing strategy to find `|BODY|` marker first, then split only the header portion
+  - Added regression test to prevent future occurrences
+
 ## [1.4.0] - 2025-11-23
 
 ### Added

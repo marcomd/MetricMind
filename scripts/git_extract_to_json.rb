@@ -138,8 +138,24 @@ class GitExtractor
         end
 
         # Parse new commit header: COMMIT|hash|date|author_name|author_email|subject|BODY|...
-        parts = line.split('|')
+        # To preserve pipe characters in the subject, find the BODY marker first
+        # and split only the header portion (before BODY)
+        body_marker_pos = line.index('|BODY|')
         in_body = false
+
+        if body_marker_pos
+          # Extract header (everything before |BODY|) and split on first 5 pipes only
+          # This gives us: COMMIT, hash, date, author_name, author_email, subject
+          header = line[0...body_marker_pos]
+          parts = header.split('|', 6)
+
+          # Extract body portion (everything after |BODY|)
+          body_portion = line[(body_marker_pos + 6)..-1]  # Skip "|BODY|"
+        else
+          # Fallback: no BODY marker found (shouldn't happen with our format)
+          parts = line.split('|', 6)
+          body_portion = ''
+        end
 
         current_commit = {
           hash: parts[1],
@@ -155,19 +171,18 @@ class GitExtractor
           files: []
         }
 
-        # Check if body starts in this line
-        body_start_idx = parts.index('BODY')
-        if body_start_idx
-          in_body = true
-          # Collect any body text after BODY marker
-          body_parts = parts[(body_start_idx + 1)..-1]
+        # Parse body portion if present
+        if !body_portion.empty?
+          body_parts = body_portion.split('|')
           body_end_idx = body_parts.index('BODYEND')
           if body_end_idx
             # Body ends in same line
             body_text = body_parts[0...body_end_idx]
             in_body = false
           else
+            # Body continues to next lines
             body_text = body_parts
+            in_body = true
           end
         end
       elsif line_stripped == 'BODYEND|' || line.include?('BODYEND|')

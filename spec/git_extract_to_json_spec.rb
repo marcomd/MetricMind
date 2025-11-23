@@ -219,6 +219,35 @@ RSpec.describe GitExtractor do
 
         expect(json_data['summary']['unique_authors']).to eq(1)
       end
+
+      it 'preserves pipe characters in commit subjects' do
+        # Create a commit with a pipe character in the subject
+        Dir.chdir(test_repo_dir) do
+          File.write('file3.txt', "Test content\n")
+          system('git add file3.txt')
+          commit_message = 'Revert "CS | Move HTML content from language-dependent configurations to banner structure (!10463)" (!10662)'
+          system("GIT_AUTHOR_DATE=\"2024-06-04T10:00:00\" GIT_COMMITTER_DATE=\"2024-06-04T10:00:00\" git commit -q -m '#{commit_message}'")
+        end
+
+        extractor = described_class.new('2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir)
+
+        allow(extractor).to receive(:print_summary)
+        extractor.run
+
+        json_data = JSON.parse(File.read(output_file))
+
+        # Find the commit with the pipe in the subject
+        commit_with_pipe = json_data['commits'].find do |c|
+          c['subject']&.include?('Revert')
+        end
+
+        expect(commit_with_pipe).not_to be_nil
+        # The full subject should be preserved, including the pipe character
+        expect(commit_with_pipe['subject']).to eq('Revert "CS | Move HTML content from language-dependent configurations to banner structure (!10463)" (!10662)')
+        # Make sure it's not truncated at the pipe
+        expect(commit_with_pipe['subject']).to include('Move HTML')
+        expect(commit_with_pipe['subject']).to include('(!10662)')
+      end
     end
 
     context 'with invalid repository' do
