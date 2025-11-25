@@ -289,8 +289,9 @@ class RunScript
     puts '=' * 65
     puts ''
 
-    categorize_commits
-    ai_categorize_commits
+    log_info('Note: Categorization and description generation now happen during extraction')
+    puts ''
+
     calculate_weights
     sync_commit_weights
     refresh_views
@@ -298,59 +299,8 @@ class RunScript
     puts ''
   end
 
-  def categorize_commits
-    log_info('Step 1: Categorizing commits...')
-
-    script_path = File.join(@script_dir, 'categorize_commits.rb')
-    args = []
-    args += ['--repo', options[:repo_name]] if options[:repo_name]
-
-    success = system(script_path, *args)
-
-    if success
-      log_success('Commits categorized')
-    else
-      log_warning('Categorization completed with warnings (this is normal if some commits couldn\'t be categorized)')
-    end
-
-    puts ''
-  end
-
-  def ai_categorize_commits
-    # Check if AI categorization is enabled
-    unless ai_enabled?
-      log_info('Step 2: AI categorization (skipped - not configured)')
-      puts ''
-      return
-    end
-
-    log_info('Step 2: AI categorizing remaining commits...')
-
-    script_path = File.join(@script_dir, 'ai_categorize_commits.rb')
-    args = []
-    args += ['--repo', options[:repo_name]] if options[:repo_name]
-
-    success = system(script_path, *args)
-
-    if success
-      log_success('AI categorization complete')
-    else
-      log_warning('AI categorization completed with warnings or errors')
-    end
-
-    puts ''
-  end
-
-  def ai_enabled?
-    # Check if AI_PROVIDER is set and valid
-    provider = ENV['AI_PROVIDER']
-    return false if provider.nil? || provider.empty?
-
-    %w[gemini ollama].include?(provider.downcase)
-  end
-
   def calculate_weights
-    log_info('Step 3: Calculating commit weights (revert detection)...')
+    log_info('Step 1: Calculating commit weights (revert detection)...')
 
     script_path = File.join(@script_dir, 'calculate_commit_weights.rb')
     args = []
@@ -368,7 +318,7 @@ class RunScript
   end
 
   def sync_commit_weights
-    log_info('Step 4: Synchronizing commit weights from categories...')
+    log_info('Step 2: Synchronizing commit weights from categories...')
 
     script_path = File.join(@script_dir, 'sync_commit_weights_from_categories.rb')
     args = []
@@ -386,7 +336,7 @@ class RunScript
   end
 
   def refresh_views
-    log_info('Step 5: Refreshing materialized views...')
+    log_info('Step 3: Refreshing materialized views...')
 
     db_name = ENV['PGDATABASE'] || 'git_analytics'
     sql = 'SELECT refresh_all_mv(); SELECT refresh_category_mv();'

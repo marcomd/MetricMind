@@ -100,7 +100,16 @@ RSpec.describe DataLoader do
         allow(mock_conn).to receive(:prepare)
         allow(mock_conn).to receive(:exec_prepared).and_return(mock_result)
         allow(mock_result).to receive(:ntuples).and_return(1)
-        allow(mock_result).to receive(:[]).and_return({ 'id' => '1', 'count' => '2' })
+        allow(mock_result).to receive(:[]) do |index|
+          case index
+          when 0
+            { 'id' => '1', 'count' => '2', 'inserted' => 't' }
+          when 'id'
+            '1'
+          when 'count'
+            '2'
+          end
+        end
       end
 
       it 'loads data without errors' do
@@ -175,7 +184,7 @@ RSpec.describe DataLoader do
 
         stats = loader.instance_variable_get(:@stats)
         expect(stats[:commits_inserted]).to be >= 0
-        expect(stats[:commits_skipped]).to be >= 0
+        expect(stats[:commits_updated]).to be >= 0
       end
     end
 
@@ -251,7 +260,7 @@ RSpec.describe DataLoader do
 
   describe 'duplicate handling' do
     before do
-      # Mock for existing commit (returns 0 tuples on duplicate)
+      # Mock for UPSERT behavior
       allow(mock_conn).to receive(:exec)
 
       # Mock exec_params for SELECT query (repository check)
@@ -262,17 +271,18 @@ RSpec.describe DataLoader do
 
       allow(mock_conn).to receive(:prepare)
 
-      # First insert succeeds, second is duplicate
+      # First insert succeeds (inserted=true), second is update (inserted=false)
       allow(mock_conn).to receive(:exec_prepared) do
         @insert_count ||= 0
         @insert_count += 1
         result = instance_double(PG::Result)
-        allow(result).to receive(:ntuples).and_return(@insert_count == 1 ? 1 : 0)
+        allow(result).to receive(:ntuples).and_return(1)
+        allow(result).to receive(:[]).with(0).and_return({ 'id' => '1', 'inserted' => (@insert_count == 1 ? 't' : 'f') })
         result
       end
     end
 
-    it 'tracks duplicate commits separately' do
+    it 'tracks duplicate commits as updates' do
       loader = described_class.new(json_file)
 
       allow(loader).to receive(:puts)
@@ -281,7 +291,8 @@ RSpec.describe DataLoader do
       loader.run
 
       stats = loader.instance_variable_get(:@stats)
-      expect(stats[:commits_inserted] + stats[:commits_skipped]).to eq(2)
+      expect(stats[:commits_inserted]).to eq(1)
+      expect(stats[:commits_updated]).to eq(1)
     end
   end
 

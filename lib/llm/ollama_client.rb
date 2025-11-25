@@ -29,7 +29,7 @@ module LLM
       prompt = build_categorization_prompt(commit_data, existing_categories)
 
       with_retry do
-        response = @client.chat(messages: [{ role: 'user', content: prompt }])
+        response = @client.chat(messages: [{ role: 'user', content: prompt }], model: @model)
         response_text = extract_response_text(response)
 
         log_debug("Ollama response: #{response_text}")

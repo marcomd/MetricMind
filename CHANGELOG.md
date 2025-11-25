@@ -5,6 +5,89 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2025-11-24
+
+### Added
+- **AI-generated commit descriptions**:
+  - New `description` column in `commits` table (migration: `20251123200054_add_description_to_commits.rb`)
+  - AI generates 2-4 sentence descriptions of changes based on git diff analysis
+  - Descriptions provide human-readable summaries of technical changes
+- **Business impact assessment**:
+  - New `business_impact` column in `commits` table (migration: `20251123213919_add_business_impact_to_commits.rb`)
+  - AI assesses business value on 0-100 scale:
+    - LOW (0-30): Configuration files (yaml, json, etc.)
+    - MEDIUM (31-60): Refactors (renames, repetitive changes)
+    - HIGH (61-100): Features, bugs, security fixes
+  - Used as initial commit weight for better productivity metrics
+- **Git diff extraction during commit processing**:
+  - New `extract_diff()` method with 10KB truncation limit
+  - Provides AI with rich context for categorization and description generation
+  - Diff data not stored in JSON (only AI-generated outputs stored)
+- **Pattern-based categorization in extraction script**:
+  - New `extract_category_from_subject()` method in `git_extract_to_json.rb`
+  - Implements three pattern matching strategies:
+    - Pipe delimiter: `BILLING | Fix bug` → BILLING
+    - Square brackets: `[CS] Update widget` → CS
+    - First uppercase word: `INFRA Deploy feature` → INFRA
+  - Validates categories using `CategoryValidator` module
+  - Ignores common verbs: MERGE, FIX, ADD, UPDATE, REMOVE, DELETE
+- **Comprehensive test coverage for AI integration**:
+  - New test: `calls AI for description and business_impact even when pattern matching finds category`
+  - Validates that AI enrichment happens regardless of pattern matching results
+  - Ensures no fields are lost during two-stage categorization
+
+### Changed
+- **UPSERT functionality in data loader** (`scripts/load_json_to_db.rb`):
+  - Replaced `ON CONFLICT DO NOTHING` with `ON CONFLICT DO UPDATE`
+  - Enables re-loading existing commits to update AI-generated fields
+  - Statistics tracking updated: `commits_skipped` → `commits_updated`
+  - Uses PostgreSQL's `xmax` system column to distinguish inserts from updates
+  - **What gets updated**: `category`, `description`, `business_impact`, `ai_confidence`, `weight`, `ai_tools`, `subject`
+  - **What stays unchanged**: `commit_date`, `author_name`, `author_email`, `lines_added`, `lines_deleted`, `files_changed`
+- **Two-stage categorization architecture**:
+  - **Stage 1**: Pattern matching (fast, rule-based) runs first
+  - **Stage 2**: AI enrichment (intelligent) ALWAYS runs if available
+  - Pattern matching takes priority for category, but AI always provides description and business_impact
+  - AI category used as fallback if pattern matching fails
+  - Changed from `if...elsif` to separate `if` blocks to ensure AI always runs
+- **Default business impact increased from 50 to 100**:
+  - AI prompt updated to emphasize default of 100 for typical commits
+  - Parsing logic updated to default to 100 if AI doesn't provide value
+  - Philosophy: Commits are fully weighted unless there's a valid reason to lower value
+- **README.md documentation**:
+  - Updated "Duplicate commits" section → "Duplicate commits and re-loading data"
+  - Comprehensive UPSERT documentation with use cases and examples
+  - Clarified what fields get updated vs preserved during re-loads
+  - Added examples for backfilling AI data in existing commits
+
+### Fixed
+- **Critical bug: AI fields not set when pattern matching succeeds**:
+  - Previous implementation used `elsif`, causing AI to be skipped when pattern matching found category
+  - Result: `description`, `business_impact`, `weight`, `ai_confidence` remained NULL
+  - Fixed by changing to separate `if` blocks: pattern matching first, then AI enrichment
+  - AI now runs for ALL commits (when available), not just when pattern matching fails
+  - Test added to prevent regression: verifies AI called even with pattern-matchable commits
+- **Ollama client model parameter bug**:
+  - Fixed `ollama_client.rb` line 32: `@model` variable not passed to API calls
+  - Client was using default model instead of configured `OLLAMA_MODEL`
+  - Added `model: @model` parameter to `@client.chat()` call
+
+### Technical Details
+- **AI integration workflow** (simplified architecture):
+  - Old: Git → JSON → DB → AI categorization (post-processing)
+  - New: Git → Extract + AI → JSON (complete) → DB (single-pass)
+  - No need to store git diff in database; only AI outputs stored
+- **Weight calculation logic** (enhanced):
+  - Reverted commits: `weight = 0` (always)
+  - Valid commits with AI: `weight = (business_impact × category_weight) / 100`
+  - Valid commits without AI: `weight = category_weight`
+  - Pattern-matched commits without AI: `weight = 100` (default)
+
+### Breaking Changes
+None. All changes are backward compatible. Existing commits will have NULL values for new fields until re-processed.
+
+
+
 ## [1.4.1] - 2025-11-23
 
 ### Fixed

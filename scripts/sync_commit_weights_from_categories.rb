@@ -1,16 +1,17 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Synchronize commit weights from category weights
+# Synchronize commit weights from category weights and business impact
 #
 # Usage:
 #   ./scripts/sync_commit_weights_from_categories.rb [--dry-run] [--repo REPO_NAME]
 #
 # This script:
 # 1. Fetches all categories with their weights from the database
-# 2. For each category, updates commit weights to match the category weight
-# 3. Only updates commits where weight > 0 (preserves reverted commits at weight=0)
-# 4. Provides statistics on weight synchronization
+# 2. For each category, calculates commit weights using: weight = (business_impact × category_weight) / 100
+# 3. Falls back to category_weight if business_impact is null
+# 4. Only updates commits where weight > 0 (preserves reverted commits at weight=0)
+# 5. Provides statistics on weight synchronization
 
 require 'bundler/setup'
 require 'dotenv/load' unless ENV['RSPEC_RUNNING']
@@ -18,8 +19,10 @@ require 'pg'
 require 'optparse'
 require_relative '../lib/db_connection'
 
-# Synchronizes commit weights based on their category's weight
-# Updates commits.weight to match categories.weight, but only for non-reverted commits (weight > 0)
+# Synchronizes commit weights based on their category's weight and business impact
+# Calculates weight as: (business_impact × category_weight) / 100
+# Falls back to category_weight if business_impact is null
+# Only updates non-reverted commits (weight > 0)
 class CommitWeightSynchronizer
   # Initializes a new CommitWeightSynchronizer instance
   # @param options [Hash] configuration options
@@ -191,13 +194,18 @@ class CommitWeightSynchronizer
   end
 
   # Builds the SQL query to update commit weights
+  # Calculates weight as: (business_impact × category_weight) / 100
+  # Falls back to category_weight if business_impact is null
   # @return [String] the SQL query
   def build_update_query
     if @repo_filter
       # With repository filter: JOIN with repositories table
       <<~SQL
         UPDATE commits c
-        SET weight = $2
+        SET weight = CASE
+          WHEN c.business_impact IS NOT NULL THEN (c.business_impact * $2) / 100
+          ELSE $2
+        END
         FROM repositories r
         WHERE c.repository_id = r.id
           AND r.name = $1
@@ -208,7 +216,10 @@ class CommitWeightSynchronizer
       # Without repository filter: Direct update, no JOIN needed
       <<~SQL
         UPDATE commits c
-        SET weight = $1
+        SET weight = CASE
+          WHEN c.business_impact IS NOT NULL THEN (c.business_impact * $1) / 100
+          ELSE $1
+        END
         WHERE c.category = $2
           AND c.weight > 0
       SQL

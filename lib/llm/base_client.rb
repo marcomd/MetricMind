@@ -21,10 +21,10 @@ module LLM
       validate_configuration!
     end
 
-    # Main interface method - categorize a commit
-    # @param commit_data [Hash] Commit information (subject, hash, files)
+    # Main interface method - categorize a commit and generate description
+    # @param commit_data [Hash] Commit information (subject, hash, files, diff)
     # @param existing_categories [Array<String>] List of approved categories
-    # @return [Hash] { category: String, confidence: Integer }
+    # @return [Hash] { category: String, confidence: Integer, description: String }
     def categorize(commit_data, existing_categories)
       raise NotImplementedError, "#{self.class} must implement #categorize"
     end
@@ -60,7 +60,7 @@ module LLM
       raise ConfigurationError, 'Temperature must be between 0 and 2' unless @temperature.between?(0, 2)
     end
 
-    # Build standardized prompt for categorization
+    # Build standardized prompt for categorization and description
     # @param commit_data [Hash] Commit information
     # @param existing_categories [Array<String>] List of approved categories
     # @return [String] Formatted prompt
@@ -71,6 +71,13 @@ module LLM
                         'MODIFIED FILES: (not available)'
                       end
 
+      diff_section = if commit_data[:diff]
+                       truncated_label = commit_data[:diff_truncated] ? ' [TRUNCATED TO 10KB]' : ''
+                       "DIFF (changes made)#{truncated_label}:\n```\n#{commit_data[:diff]}\n```"
+                     else
+                       'DIFF: (not available)'
+                     end
+
       categories_section = if existing_categories.any?
                              "EXISTING CATEGORIES (prefer these):\n#{existing_categories.join(', ')}"
                            else
@@ -78,7 +85,7 @@ module LLM
                            end
 
       <<~PROMPT
-        You are a commit categorization assistant. Analyze this commit and assign ONE category.
+        You are a commit categorization assistant. Analyze this commit, assign ONE category, and write a description.
 
         COMMIT DETAILS:
         - Subject: "#{commit_data[:subject]}"
@@ -86,28 +93,38 @@ module LLM
 
         #{files_section}
 
+        #{diff_section}
+
         #{categories_section}
 
         INSTRUCTIONS:
         1. If this clearly fits an existing category, return that category name
         2. Only create a NEW category if none of the existing ones fit well
         3. Categories should be SHORT (1-2 words), UPPERCASE, business-focused
-        4. Consider file paths as strong signals (e.g., app/jobs/billing/* → BILLING)
+        4. Consider file paths and diff as strong signals (e.g., app/jobs/billing/* → BILLING)
         5. Provide a confidence score (0-100) for your categorization
         6. IMPORTANT: Categories must start with a LETTER, not a number or special character
         7. AVOID: Version numbers (2.58.0), issue numbers (#6802), years (2023), purely numeric values
         8. PREFER: Business domains (BILLING, SECURITY), technical areas (API, DATABASE), or features (AUTH, REPORTING)
+        9. Write a DESCRIPTION (2-4 sentences) explaining what changed and why, using the diff details
+        10. Assess the BUSINESS_IMPACT (0-100) based on these guidelines:
+            - LOW (0-30): Configuration files (yaml, json, etc.)
+            - MEDIUM (31-60): Refactors (renames, repetitive changes)
+            - HIGH (61-100): Features, bugs, security fixes
+            - DEFAULT: Use 100 for typical commits. Only lower if clearly config/refactor work.
 
         RESPONSE FORMAT (respond with ONLY this format, no extra text):
         CATEGORY: <category_name>
         CONFIDENCE: <0-100>
+        BUSINESS_IMPACT: <0-100>
         REASON: <brief explanation>
+        DESCRIPTION: <2-4 sentence description of the changes>
       PROMPT
     end
 
-    # Parse LLM response to extract category and confidence
+    # Parse LLM response to extract category, confidence, description, and business impact
     # @param response [String] Raw LLM response
-    # @return [Hash] { category: String, confidence: Integer, reason: String }
+    # @return [Hash] { category: String, confidence: Integer, business_impact: Integer, reason: String, description: String }
     def parse_categorization_response(response)
       # Extract category (required) - stop at newline or end of string
       # Allow categories starting with numbers, #, and containing dots so validation can reject them with proper error
@@ -126,14 +143,25 @@ module LLM
       confidence = confidence_match ? confidence_match[1].to_i : 50
       confidence = [[confidence, 0].max, 100].min # Clamp to 0-100
 
+      # Extract business impact (optional, default to 100)
+      business_impact_match = response.match(/BUSINESS_IMPACT:\s*(\d+)/i)
+      business_impact = business_impact_match ? business_impact_match[1].to_i : 100
+      business_impact = [[business_impact, 0].max, 100].min # Clamp to 0-100
+
       # Extract reason (optional)
-      reason_match = response.match(/REASON:\s*(.+?)(?:\n|$)/i)
+      reason_match = response.match(/REASON:\s*(.+?)(?:\n|DESCRIPTION:|$)/im)
       reason = reason_match ? reason_match[1].strip : 'No reason provided'
+
+      # Extract description (optional, can be multi-line)
+      description_match = response.match(/DESCRIPTION:\s*(.+?)(?:\n\n|$)/im)
+      description = description_match ? description_match[1].strip : nil
 
       {
         category: category,
         confidence: confidence,
-        reason: reason
+        business_impact: business_impact,
+        reason: reason,
+        description: description
       }
     end
 

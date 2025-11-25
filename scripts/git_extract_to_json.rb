@@ -5,6 +5,9 @@ require 'json'
 require 'open3'
 require 'time'
 require 'fileutils'
+require_relative '../lib/llm/client_factory'
+require_relative '../lib/sequel_connection'
+require_relative '../lib/category_validator'
 
 # Git commit data extractor that exports to JSON format
 # Extracts commit history from a Git repository and exports it to a structured JSON file
@@ -19,14 +22,18 @@ class GitExtractor
   # @param repo_name [String, nil] optional repository name (auto-detected if nil)
   # @param repo_path [String] path to the git repository (default: current directory)
   # @param repo_description [String, nil] optional repository description
-  def initialize(from_date, to_date, output_file, repo_name = nil, repo_path = '.', repo_description = nil)
+  # @param skip_ai [Boolean] skip AI categorization and description generation (default: false)
+  def initialize(from_date, to_date, output_file, repo_name = nil, repo_path = '.', repo_description = nil, skip_ai: false)
     @from_date = from_date
     @to_date = to_date
     @output_file = File.expand_path(output_file)
     @repo_path = File.expand_path(repo_path)
     @repo_name = repo_name || detect_repo_name
     @repo_description = repo_description
+    @skip_ai = skip_ai
     @commits = []
+    @ai_client = nil
+    @existing_categories = []
   end
 
   # Executes the full extraction workflow
@@ -36,6 +43,7 @@ class GitExtractor
   def run
     validate_git_repo!
     validate_date_range!
+    initialize_ai_client unless @skip_ai
     extract_commits
     write_output
     print_summary
@@ -133,6 +141,36 @@ class GitExtractor
           # Extract AI tools from accumulated body text
           full_body = body_text.join("\n")
           current_commit[:ai_tools] = extract_ai_tools(full_body)
+
+          # Two-stage categorization: Pattern matching first, then AI for enrichment
+          # Stage 1: Pattern-based categorization (fast, rule-based)
+          pattern_category = extract_category_from_subject(current_commit[:subject])
+          if pattern_category
+            current_commit[:category] = pattern_category
+          end
+
+          # Stage 2: AI enrichment (always run if available, for description and business_impact)
+          if @ai_client && !@skip_ai
+            begin
+              diff_result = extract_diff(current_commit[:hash])
+              if diff_result
+                ai_result = categorize_with_ai(current_commit, diff_result)
+                if ai_result
+                  # Use AI category only if pattern matching didn't find one
+                  current_commit[:category] ||= ai_result[:category]
+                  current_commit[:ai_confidence] = ai_result[:confidence]
+                  current_commit[:business_impact] = ai_result[:business_impact]
+                  current_commit[:description] = ai_result[:description]
+                  # Use business_impact as initial weight (or keep default 100 if not set)
+                  current_commit[:weight] = ai_result[:business_impact] || 100
+                end
+              end
+            rescue StandardError => e
+              warn "Warning: AI processing failed for commit #{current_commit[:hash][0..7]}: #{e.message}"
+              # Continue with pattern-matched category if available, null values for AI fields
+            end
+          end
+
           @commits << current_commit
           body_text = []
         end
@@ -165,6 +203,10 @@ class GitExtractor
           subject: parts[5],
           weight: 100,
           ai_tools: nil,
+          category: nil,
+          ai_confidence: nil,
+          business_impact: nil,
+          description: nil,
           lines_added: 0,
           lines_deleted: 0,
           files_changed: 0,
@@ -222,6 +264,28 @@ class GitExtractor
     if current_commit
       full_body = body_text.join("\n")
       current_commit[:ai_tools] = extract_ai_tools(full_body)
+
+      # AI categorization and description generation
+      if @ai_client && !@skip_ai
+        begin
+          diff_result = extract_diff(current_commit[:hash])
+          if diff_result
+            ai_result = categorize_with_ai(current_commit, diff_result)
+            if ai_result
+              current_commit[:category] = ai_result[:category]
+              current_commit[:ai_confidence] = ai_result[:confidence]
+              current_commit[:business_impact] = ai_result[:business_impact]
+              current_commit[:description] = ai_result[:description]
+              # Use business_impact as initial weight (or keep default 100 if not set)
+              current_commit[:weight] = ai_result[:business_impact] || 100
+            end
+          end
+        rescue StandardError => e
+          warn "Warning: AI processing failed for commit #{current_commit[:hash][0..7]}: #{e.message}"
+          # Continue with null values for AI fields
+        end
+      end
+
       @commits << current_commit
     end
   end
@@ -289,6 +353,121 @@ class GitExtractor
     Time.parse(date_str).iso8601
   rescue ArgumentError
     date_str
+  end
+
+  # Initializes the AI client and loads existing categories from database
+  # @return [void]
+  def initialize_ai_client
+    return unless ENV['AI_PROVIDER']
+
+    begin
+      @ai_client = LLM::ClientFactory.create
+      load_existing_categories
+      puts "✓ AI categorization enabled (provider: #{ENV['AI_PROVIDER']})"
+    rescue StandardError => e
+      warn "Warning: Could not initialize AI client: #{e.message}"
+      warn "Continuing without AI categorization..."
+      @ai_client = nil
+    end
+  end
+
+  # Loads existing categories from the database
+  # @return [void]
+  def load_existing_categories
+    db = SequelConnection.db
+    @existing_categories = db[:categories].select_map(:name).sort
+  rescue StandardError => e
+    warn "Warning: Could not load existing categories: #{e.message}"
+    @existing_categories = []
+  end
+
+  # Extracts git diff for a specific commit
+  # @param commit_hash [String] the commit hash
+  # @return [Hash, nil] { content: String, truncated: Boolean } or nil if extraction fails
+  def extract_diff(commit_hash)
+    cmd = ['git', '-C', @repo_path, 'show', '--format=', '--no-color', commit_hash]
+    stdout, _stderr, status = Open3.capture3(*cmd)
+
+    return nil unless status.success?
+
+    # Truncate if needed (10KB limit)
+    max_size = 10_240
+    truncated = stdout.bytesize > max_size
+    diff = truncated ? stdout.byteslice(0, max_size) : stdout
+
+    { content: diff, truncated: truncated }
+  end
+
+  # Extracts category from commit subject using pattern matching
+  # Supports: pipe delimiter (BILLING | Fix), square brackets ([BILLING] Fix), and uppercase first word (BILLING Fix)
+  # Ignores common verbs like MERGE, FIX, ADD, UPDATE, REMOVE, DELETE
+  # Validates extracted categories to prevent version numbers, issue numbers, etc.
+  # @param subject [String, nil] the commit subject line
+  # @return [String, nil] the extracted category in uppercase, or nil if no category found
+  def extract_category_from_subject(subject)
+    return nil if subject.nil? || subject.strip.empty?
+
+    category = nil
+
+    # Pattern 1: Pipe delimiter (e.g., "BILLING | Fix bug")
+    if subject.include?(' | ')
+      extracted = subject.split(' | ', 2).first.strip.upcase
+      category = extracted unless extracted.empty?
+    end
+
+    # Pattern 2: Square brackets (e.g., "[BILLING] Fix bug")
+    if category.nil? && subject.match?(/^\[([^\]]+)\]/)
+      match = subject.match(/^\[([^\]]+)\]/)
+      category = match[1].strip.upcase if match
+    end
+
+    # Pattern 3: First word if ALL UPPERCASE (e.g., "BILLING Fix bug")
+    if category.nil?
+      first_word = subject.split(/\s+/, 2).first
+      if first_word && first_word == first_word.upcase && first_word.length >= 2
+        # Ignore common all-caps words that aren't categories
+        unless ['MERGE', 'FIX', 'ADD', 'UPDATE', 'REMOVE', 'DELETE'].include?(first_word)
+          category = first_word
+        end
+      end
+    end
+
+    # Validate the extracted category using CategoryValidator
+    if category && !CategoryValidator.valid_category?(category)
+      category = nil
+    end
+
+    category
+  end
+
+  # Categorizes a commit using AI and generates description
+  # @param commit [Hash] the commit data
+  # @param diff_result [Hash] the git diff result { content: String, truncated: Boolean }
+  # @return [Hash, nil] { category: String, confidence: Integer, business_impact: Integer, description: String } or nil
+  def categorize_with_ai(commit, diff_result)
+    return nil unless @ai_client
+
+    # Build commit data for AI
+    commit_data = {
+      hash: commit[:hash],
+      subject: commit[:subject],
+      files: commit[:files].map { |f| f[:filename] },
+      diff: diff_result[:content],
+      diff_truncated: diff_result[:truncated]
+    }
+
+    # Call AI to get category, confidence, business_impact, and description
+    result = @ai_client.categorize(commit_data, @existing_categories)
+
+    {
+      category: result[:category],
+      confidence: result[:confidence],
+      business_impact: result[:business_impact],
+      description: result[:description]
+    }
+  rescue StandardError => e
+    warn "Warning: AI categorization failed for commit #{commit[:hash][0..7]}: #{e.message}"
+    nil
   end
 
   # Writes the extracted commit data to a JSON output file

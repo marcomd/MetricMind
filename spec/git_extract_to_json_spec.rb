@@ -361,4 +361,223 @@ RSpec.describe GitExtractor do
       expect(json_data['commits']).to be_empty
     end
   end
+
+  describe '#extract_diff' do
+    let(:test_repo_dir) { File.join(temp_dir, 'test-repo') }
+
+    before do
+      create_test_git_repo(test_repo_dir)
+    end
+
+    it 'extracts git diff for a commit' do
+      extractor = described_class.new('2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir)
+
+      # Get the hash of the second commit
+      commit_hash = Dir.chdir(test_repo_dir) do
+        `git log --format=%H --skip=1 --max-count=1`.strip
+      end
+
+      diff_result = extractor.send(:extract_diff, commit_hash)
+
+      expect(diff_result).to be_a(Hash)
+      expect(diff_result).to have_key(:content)
+      expect(diff_result).to have_key(:truncated)
+      expect(diff_result[:content]).to include('diff --git')
+      expect(diff_result[:content]).to include('file1.txt')
+      expect(diff_result[:truncated]).to be false
+    end
+
+    it 'truncates large diffs to 10KB' do
+      extractor = described_class.new('2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir)
+
+      # Create a commit with a large diff
+      large_content = 'x' * 15_000
+      commit_hash = Dir.chdir(test_repo_dir) do
+        File.write('large_file.txt', large_content)
+        system('git add large_file.txt')
+        system('GIT_AUTHOR_DATE="2024-06-05T10:00:00" GIT_COMMITTER_DATE="2024-06-05T10:00:00" git commit -q -m "Add large file"')
+        `git log --format=%H --max-count=1`.strip
+      end
+
+      diff_result = extractor.send(:extract_diff, commit_hash)
+
+      expect(diff_result[:content].bytesize).to be <= 10_240
+      expect(diff_result[:truncated]).to be true
+    end
+
+    it 'returns nil for invalid commit hash' do
+      extractor = described_class.new('2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir)
+
+      diff_result = extractor.send(:extract_diff, 'invalid_hash_12345')
+
+      expect(diff_result).to be_nil
+    end
+  end
+
+  describe 'AI-integrated extraction' do
+    let(:test_repo_dir) { File.join(temp_dir, 'test-repo') }
+
+    before do
+      create_test_git_repo(test_repo_dir)
+    end
+
+    context 'when AI_PROVIDER is set' do
+      before do
+        ENV['AI_PROVIDER'] = 'ollama'
+        ENV['OLLAMA_URL'] = 'http://localhost:11434'
+        ENV['OLLAMA_MODEL'] = 'llama2'
+      end
+
+      after do
+        ENV.delete('AI_PROVIDER')
+        ENV.delete('OLLAMA_URL')
+        ENV.delete('OLLAMA_MODEL')
+      end
+
+      it 'includes category, confidence, and description in JSON output' do
+        extractor = described_class.new('2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir)
+
+        # Mock the AI categorization to avoid actual LLM calls
+        mock_ai_result = {
+          category: 'DEVELOPMENT',
+          confidence: 85,
+          description: 'Added initial project setup with README documentation.'
+        }
+
+        allow(extractor).to receive(:categorize_with_ai).and_return(mock_ai_result)
+        allow(extractor).to receive(:print_summary)
+
+        extractor.run
+
+        json_data = JSON.parse(File.read(output_file))
+        commits = json_data['commits']
+
+        expect(commits).not_to be_empty
+        first_commit = commits.first
+
+        expect(first_commit).to have_key('category')
+        expect(first_commit).to have_key('ai_confidence')
+        expect(first_commit).to have_key('description')
+        expect(first_commit['category']).to eq('DEVELOPMENT')
+        expect(first_commit['ai_confidence']).to eq(85)
+        expect(first_commit['description']).to eq('Added initial project setup with README documentation.')
+      end
+
+      it 'handles AI categorization failures gracefully' do
+        extractor = described_class.new('2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir)
+
+        # Mock AI failure
+        allow(extractor).to receive(:categorize_with_ai).and_raise(StandardError, 'LLM unavailable')
+        allow(extractor).to receive(:print_summary)
+        allow(extractor).to receive(:warn) # Suppress warning
+
+        expect { extractor.run }.not_to raise_error
+
+        json_data = JSON.parse(File.read(output_file))
+        commits = json_data['commits']
+
+        expect(commits).not_to be_empty
+        first_commit = commits.first
+
+        # When AI fails, category and description should be nil
+        expect(first_commit['category']).to be_nil
+        expect(first_commit['ai_confidence']).to be_nil
+        expect(first_commit['description']).to be_nil
+      end
+
+      it 'calls AI for description and business_impact even when pattern matching finds category' do
+        # Create a test repo with a commit that has a pattern-matchable category
+        temp_dir = Dir.mktmpdir
+        system("git init #{temp_dir} > /dev/null 2>&1")
+        Dir.chdir(temp_dir) do
+          File.write('test.txt', 'content')
+          system('git add test.txt > /dev/null 2>&1')
+          system('git config user.email "test@example.com"')
+          system('git config user.name "Test User"')
+          # Commit with pattern-matchable category (pipe delimiter)
+          system('git commit -m "BILLING | Fix payment processing bug" > /dev/null 2>&1')
+        end
+
+        output = File.join(temp_dir, 'output.json')
+        extractor = described_class.new('1 day ago', 'now', output, 'test', temp_dir)
+
+        # Mock AI to return description and business_impact
+        mock_ai_result = {
+          category: 'BILLING', # AI might return same category
+          confidence: 90,
+          business_impact: 95,
+          description: 'Fixed critical bug in payment processing that was causing transaction failures.'
+        }
+
+        # Expect AI to be called even though pattern matching found category
+        expect(extractor).to receive(:categorize_with_ai).once.and_return(mock_ai_result)
+        allow(extractor).to receive(:print_summary)
+
+        extractor.run
+
+        json_data = JSON.parse(File.read(output))
+        commits = json_data['commits']
+
+        expect(commits).not_to be_empty
+        commit = commits.first
+
+        # Pattern matching should find BILLING
+        expect(commit['category']).to eq('BILLING')
+
+        # AI should still be called to provide these fields
+        expect(commit['description']).to eq('Fixed critical bug in payment processing that was causing transaction failures.')
+        expect(commit['business_impact']).to eq(95)
+        expect(commit['ai_confidence']).to eq(90)
+        expect(commit['weight']).to eq(95) # Should use business_impact as weight
+
+        FileUtils.rm_rf(temp_dir)
+      end
+    end
+
+    context 'when AI_PROVIDER is not set' do
+      before do
+        ENV.delete('AI_PROVIDER')
+      end
+
+      it 'extracts commits without AI categorization' do
+        extractor = described_class.new('2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir)
+
+        allow(extractor).to receive(:print_summary)
+
+        extractor.run
+
+        json_data = JSON.parse(File.read(output_file))
+        commits = json_data['commits']
+
+        expect(commits).not_to be_empty
+        first_commit = commits.first
+
+        # Without AI, category and description should be nil
+        expect(first_commit['category']).to be_nil
+        expect(first_commit['ai_confidence']).to be_nil
+        expect(first_commit['description']).to be_nil
+      end
+    end
+
+    context 'with --skip-ai flag' do
+      it 'skips AI processing when flag is present' do
+        extractor = described_class.new('2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir, nil, skip_ai: true)
+
+        allow(extractor).to receive(:print_summary)
+
+        extractor.run
+
+        json_data = JSON.parse(File.read(output_file))
+        commits = json_data['commits']
+
+        expect(commits).not_to be_empty
+        first_commit = commits.first
+
+        # With --skip-ai flag, category and description should be nil
+        expect(first_commit['category']).to be_nil
+        expect(first_commit['ai_confidence']).to be_nil
+        expect(first_commit['description']).to be_nil
+      end
+    end
+  end
 end

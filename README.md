@@ -890,11 +890,44 @@ psql -d git_analytics -f schema/postgres_views.sql
 - Check date range includes commits: `git log --since="FROM" --until="TO" --oneline`
 - Ensure you're on the correct branch
 
-### Duplicate commits
+### Duplicate commits and re-loading data
 
-The system handles duplicates automatically using `ON CONFLICT DO NOTHING`. Re-running extraction is safe and will only insert new commits.
+The system now uses **UPSERT functionality** (`ON CONFLICT DO UPDATE`) to handle duplicate commits intelligently. This means:
 
-If you need to clean and reload data for a repository (e.g., after accidentally loading duplicate data):
+- **New commits**: Will be inserted as usual
+- **Existing commits**: Will be updated with new data (AI-generated fields, categories, weights, etc.)
+- **Re-running extraction is safe**: You can re-process any time period to update commit data
+
+This is particularly useful for:
+- Backfilling new fields (description, business_impact) after enabling AI categorization
+- Updating subjects after fixing bugs in the extraction process
+- Recalculating weights based on new business impact assessments
+- Regenerating AI categorizations with improved prompts
+
+**Example use cases:**
+
+```bash
+# Re-process October to backfill AI-generated fields (description, business_impact)
+./scripts/run.rb --from "2024-10-01" --to "2024-10-31"
+
+# Re-process last 3 months for a specific repository
+./scripts/run.rb mater --from "3 months ago" --to "now"
+
+# The loader will show statistics:
+#   Commits inserted: 50   (new commits)
+#   Commits updated: 120   (existing commits with updated data)
+```
+
+**What gets updated:**
+- AI-generated fields: `category`, `description`, `business_impact`, `ai_confidence`
+- Commit weights: `weight`, `ai_tools`
+- Subject line (in case of extraction bugfixes)
+
+**What stays unchanged:**
+- Original commit metadata: `commit_date`, `author_name`, `author_email`
+- Git statistics: `lines_added`, `lines_deleted`, `files_changed`
+
+If you need to completely clean and reload data for a repository:
 
 ```bash
 # Clean and reload single repository (prompts for confirmation)

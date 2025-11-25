@@ -23,7 +23,7 @@ class DataLoader
       repos_created: 0,
       repos_updated: 0,
       commits_inserted: 0,
-      commits_skipped: 0,
+      commits_updated: 0,
       errors: 0
     }
   end
@@ -173,8 +173,9 @@ class DataLoader
   end
 
   # Loads all commits from the JSON data into the database
-  # Processes commits in batches and handles duplicates with ON CONFLICT
-  # Updates statistics for inserted, skipped, and errored commits
+  # Processes commits in batches and handles duplicates with UPSERT
+  # Updates AI-generated fields (category, description, business_impact, etc.) for existing commits
+  # Updates statistics for inserted, updated, and errored commits
   # @return [void]
   def load_commits
     commits = @data['commits']
@@ -182,14 +183,22 @@ class DataLoader
 
     return if commits.empty?
 
-    # Prepare the insert statement
+    # Prepare the upsert statement
     insert_stmt = @conn.prepare('insert_commit', <<~SQL)
       INSERT INTO commits (
         repository_id, hash, commit_date, author_name, author_email,
-        subject, lines_added, lines_deleted, files_changed, weight, ai_tools
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      ON CONFLICT (repository_id, hash) DO NOTHING
-      RETURNING id
+        subject, lines_added, lines_deleted, files_changed, weight, ai_tools,
+        category, ai_confidence, business_impact, description
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      ON CONFLICT (repository_id, hash) DO UPDATE SET
+        subject = EXCLUDED.subject,
+        weight = EXCLUDED.weight,
+        category = EXCLUDED.category,
+        ai_confidence = EXCLUDED.ai_confidence,
+        business_impact = EXCLUDED.business_impact,
+        description = EXCLUDED.description,
+        ai_tools = EXCLUDED.ai_tools
+      RETURNING id, (xmax = 0) AS inserted
     SQL
 
     # Process commits in batches for better performance
@@ -210,14 +219,22 @@ class DataLoader
               commit['lines_deleted'],
               commit['files_changed'],
               commit['weight'] || 100,
-              commit['ai_tools']
+              commit['ai_tools'],
+              commit['category'],
+              commit['ai_confidence'],
+              commit['business_impact'],
+              commit['description']
             ]
           )
 
           if result.ntuples.positive?
-            @stats[:commits_inserted] += 1
-          else
-            @stats[:commits_skipped] += 1
+            # Check if it was an insert (true) or update (false)
+            was_insert = result[0]['inserted'] == 't'
+            if was_insert
+              @stats[:commits_inserted] += 1
+            else
+              @stats[:commits_updated] += 1
+            end
           end
         rescue PG::Error => e
           warn "  Warning: Error inserting commit #{commit['hash']}: #{e.message}"
@@ -263,7 +280,7 @@ class DataLoader
     puts "  Repositories created: #{@stats[:repos_created]}"
     puts "  Repositories updated: #{@stats[:repos_updated]}"
     puts "  Commits inserted:     #{@stats[:commits_inserted]}"
-    puts "  Commits skipped:      #{@stats[:commits_skipped]} (duplicates)"
+    puts "  Commits updated:      #{@stats[:commits_updated]}"
     puts "  Errors:               #{@stats[:errors]}"
     puts ""
     puts "Total commits in DB for this repository: #{get_total_commits}"
