@@ -54,6 +54,11 @@ class RunScript
       log_error('Cannot use both --skip-extraction and --skip-load (nothing to do!)')
       exit(1)
     end
+
+    # Warn if --skip-ai won't have any effect
+    if options[:skip_ai] && !options[:extract]
+      log_warning('Note: --skip-ai has no effect when skipping extraction')
+    end
   end
 
   def load_configuration
@@ -112,6 +117,18 @@ class RunScript
     log_info("Configuration: #{options[:config]}")
     log_info("Output directory: #{@output_dir}")
     log_info("Extraction period: #{options[:from_date]} to #{options[:to_date]}") if options[:extract]
+
+    # Display AI enrichment status
+    if options[:extract]
+      if options[:skip_ai]
+        log_info("AI enrichment: DISABLED (--skip-ai)")
+      elsif ENV['AI_PROVIDER']
+        log_info("AI enrichment: ENABLED (#{ENV['AI_PROVIDER']})")
+      else
+        log_info("AI enrichment: DISABLED (AI_PROVIDER not set)")
+      end
+    end
+
     puts ''
     log_info('Workflow:')
 
@@ -230,7 +247,11 @@ class RunScript
     ]
     args << repo_description if repo_description
 
-    success = system(*args)
+    # Set environment variable for extraction script
+    env = {}
+    env['SKIP_AI'] = 'true' if options[:skip_ai]
+
+    success = system(env, *args)
 
     unless success
       log_error("Extraction failed for #{repo_name}")
@@ -289,7 +310,12 @@ class RunScript
     puts '=' * 65
     puts ''
 
-    log_info('Note: Categorization and description generation now happen during extraction')
+    if options[:skip_ai]
+      log_info('Note: AI enrichment was skipped during extraction (--skip-ai)')
+      log_info('      To enrich commits later: ./scripts/ai_categorize_commits.rb --from "3 months ago"')
+    else
+      log_info('Note: Categorization and description generation happened during extraction')
+    end
     puts ''
 
     calculate_weights
@@ -393,6 +419,7 @@ if __FILE__ == $PROGRAM_NAME
     clean: false,
     extract: true,
     load: true,
+    skip_ai: false,
     repo_name: nil,
     config: File.expand_path('../config/repositories.json', __dir__),
     from_date: ENV['DEFAULT_FROM_DATE'] || '6 months ago',
@@ -423,6 +450,10 @@ if __FILE__ == $PROGRAM_NAME
 
     opts.on('--skip-load', 'Skip database loading, only extract to JSON files') do
       options[:load] = false
+    end
+
+    opts.on('--skip-ai', 'Skip AI enrichment during extraction (faster for large date ranges)') do
+      options[:skip_ai] = true
     end
 
     opts.on('--from DATE', 'Start date for extraction (default: 6 months ago)') do |date|
@@ -463,11 +494,18 @@ if __FILE__ == $PROGRAM_NAME
           # Custom date range
           #{$PROGRAM_NAME} --from "1 month ago" --to "now"
 
+          # Skip AI enrichment for bulk historical extraction
+          #{$PROGRAM_NAME} --skip-ai --from "10 years ago" --to "now"
+
+          # Extract without AI, then enrich selectively
+          #{$PROGRAM_NAME} --skip-ai --skip-load
+
           # Clean single repo with custom dates
           #{$PROGRAM_NAME} mater --clean --from "2024-01-01" --to "2024-12-31"
 
         Workflow:
           Without flags:     Extract from git → Load to database
+          --skip-ai:         Extract without AI enrichment (faster for large date ranges)
           --clean:           Clean → Extract → Load (sequential per repo)
           --skip-extraction: Load from existing JSON files only
           --skip-load:       Extract to JSON files only

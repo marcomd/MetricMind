@@ -16,6 +16,7 @@ gem 'dotenv', '~> 2.8'
 
 # LLM integration for AI-powered categorization
 gem 'langchainrb', '~> 0.17'
+gem 'ruby-anthropic', '~> 0.4' # Required for Anthropic/Claude provider (langchainrb dependency)
 
 # HTTP client with retry support
 gem 'faraday', '~> 2.7'

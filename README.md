@@ -280,6 +280,23 @@ Examples:
 ./scripts/git_extract_to_json.rb "2025-01-01" "2025-12-31" "data/backend.json" "backend-api" "/path/to/repo"
 ```
 
+### Working with Large Date Ranges
+
+When extracting years of history, AI enrichment can be slow and expensive. Use the two-stage approach:
+
+```bash
+# Stage 1: Fast extraction of full history without AI
+./scripts/run.rb --skip-ai --from "10 years ago" --to "now"
+
+# Stage 2: AI enrichment for recent commits only
+./scripts/ai_categorize_commits.rb --from "3 months ago" --to "now"
+```
+
+This workflow:
+1. Extracts all commits with pattern-based categorization only
+2. Adds AI descriptions and impact scores to recent commits
+3. Saves time and API costs by focusing AI on relevant data
+
 ### Load Data to Database
 
 Load JSON export into PostgreSQL:
@@ -977,6 +994,7 @@ For commits that pattern matching couldn't categorize, the system can use Large 
 **Supported Providers:**
 - **Ollama** (free, local) - Run models like llama3.2, mistral, codellama on your machine
 - **Google Gemini** (cloud, API key required) - Fast and accurate cloud-based categorization
+- **Anthropic Claude** (cloud, API key required) - Advanced reasoning and high-quality categorization
 
 ### Getting Started with AI Categorization
 
@@ -1011,6 +1029,19 @@ AI_PROVIDER=gemini
 GEMINI_API_KEY=your_api_key_here
 GEMINI_MODEL=gemini-2.0-flash-exp
 GEMINI_TEMPERATURE=0.1
+PREVENT_NUMERIC_CATEGORIES=true  # Prevents version numbers like "2.58.0"
+```
+
+**Option C: Anthropic Claude (Cloud)**
+```bash
+# Get API key from https://console.anthropic.com/settings/keys
+
+# Configure in .env
+AI_PROVIDER=claude
+CLAUDE_API_KEY=your_api_key_here
+CLAUDE_MODEL=claude-haiku-4-5              # Recommended: Use alias (claude-haiku-4-5 cheapest, claude-sonnet-4-5 balanced)
+                                           # Or dated: claude-haiku-4-5-20251001, claude-sonnet-4-5-20250929
+CLAUDE_TEMPERATURE=0.1
 PREVENT_NUMERIC_CATEGORIES=true  # Prevents version numbers like "2.58.0"
 ```
 

@@ -550,8 +550,11 @@ if __FILE__ == $PROGRAM_NAME
   repo_path = ARGV[4] || '.'
   repo_description = ARGV[5]
 
+  # Read SKIP_AI from environment (set by run.rb orchestrator)
+  skip_ai = ENV['SKIP_AI'] == 'true'
+
   begin
-    extractor = GitExtractor.new(from_date, to_date, output_file, repo_name, repo_path, repo_description)
+    extractor = GitExtractor.new(from_date, to_date, output_file, repo_name, repo_path, repo_description, skip_ai: skip_ai)
     extractor.run
   rescue Interrupt
     puts "\n\nInterrupted by user"

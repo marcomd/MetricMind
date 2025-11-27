@@ -2,36 +2,37 @@
 
 require 'spec_helper'
 require_relative '../../lib/llm/ollama_client'
+require_relative '../../lib/llm/claude_client'
 require_relative '../../lib/llm/categorizer'
 require 'socket'
 
 RSpec.describe 'AI Categorization Integration', :integration do
-  # Helper to check if Ollama is running
-  def ollama_available?
-    TCPSocket.new('localhost', 11434).close
-    true
-  rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError
-    false
-  end
-
-  before do
-    skip 'Ollama is not running on localhost:11434' unless ollama_available?
-
-    ENV['OLLAMA_URL'] = 'http://localhost:11434'
-    ENV['OLLAMA_MODEL'] = 'llama3.2' # or 'llama2' depending on what's installed
-    ENV['OLLAMA_TEMPERATURE'] = '0.1'
-    ENV['AI_TIMEOUT'] = '60' # Give it more time for integration test
-  end
-
-  after do
-    ENV.delete('OLLAMA_URL')
-    ENV.delete('OLLAMA_MODEL')
-    ENV.delete('OLLAMA_TEMPERATURE')
-    ENV.delete('AI_TIMEOUT')
-  end
-
   describe 'OllamaClient real API call' do
     let(:client) { LLM::OllamaClient.new }
+
+    # Helper to check if Ollama is running
+    def ollama_available?
+      TCPSocket.new('localhost', 11434).close
+      true
+    rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError
+      false
+    end
+
+    before do
+      skip 'Ollama is not running on localhost:11434' unless ollama_available?
+
+      ENV['OLLAMA_URL'] = 'http://localhost:11434'
+      ENV['OLLAMA_MODEL'] = 'llama3.2' # or 'llama2' depending on what's installed
+      ENV['OLLAMA_TEMPERATURE'] = '0.1'
+      ENV['AI_TIMEOUT'] = '60' # Give it more time for integration test
+    end
+
+    after do
+      ENV.delete('OLLAMA_URL')
+      ENV.delete('OLLAMA_MODEL')
+      ENV.delete('OLLAMA_TEMPERATURE')
+      ENV.delete('AI_TIMEOUT')
+    end
 
     it 'successfully categorizes a commit with clear category' do
       commit_data = {
@@ -141,6 +142,142 @@ RSpec.describe 'AI Categorization Integration', :integration do
 
       puts "\n[Integration Test] Minimal Info Response:"
       puts "  Category: #{result[:category]} (#{result[:confidence]}%)"
+    end
+  end
+
+  describe 'ClaudeClient real API call' do
+    # Helper to check if Claude API key is configured
+    def claude_available?
+      api_key = ENV['CLAUDE_API_KEY']
+      !api_key.nil? &&
+        !api_key.empty? &&
+        api_key != 'test_api_key' &&
+        !api_key.start_with?('your_')
+    end
+
+    before do
+      skip 'Claude API key not configured (set CLAUDE_API_KEY environment variable)' unless claude_available?
+      ENV['CLAUDE_MODEL'] = 'claude-haiku-4-5-20251001'
+      ENV['CLAUDE_TEMPERATURE'] = '0.1'
+      ENV['AI_TIMEOUT'] = '60'
+    end
+
+    after do
+      ENV.delete('CLAUDE_MODEL')
+      ENV.delete('CLAUDE_TEMPERATURE')
+      ENV.delete('AI_TIMEOUT')
+    end
+
+    let(:client) { LLM::ClaudeClient.new }
+    let(:commit_data) do
+      {
+        hash: 'test123',
+        subject: 'Add Docker configuration for containerization',
+        files: ['Dockerfile', 'docker-compose.yml', '.dockerignore']
+      }
+    end
+    let(:existing_categories) { %w[SECURITY BILLING API] }
+
+    it 'successfully categorizes a commit using real Claude API' do
+      result = client.categorize(commit_data, existing_categories)
+
+      # Verify structure
+      expect(result).to be_a(Hash)
+      expect(result).to have_key(:category)
+      expect(result).to have_key(:confidence)
+      expect(result).to have_key(:business_impact)
+      expect(result).to have_key(:reason)
+      expect(result).to have_key(:description)
+
+      # Verify types and formats
+      expect(result[:category]).to be_a(String)
+      expect(result[:category]).to match(/^[A-Z][A-Z0-9_]*$/)
+      expect(result[:confidence]).to be_between(0, 100)
+      expect(result[:business_impact]).to be_between(0, 100)
+      expect(result[:reason]).to be_a(String)
+      expect(result[:description]).to be_a(String)
+
+      puts "\n[E2E Test] Claude Response:"
+      puts "  Category: #{result[:category]} (confidence: #{result[:confidence]}%)"
+      puts "  Business Impact: #{result[:business_impact]}%"
+      puts "  Reason: #{result[:reason]}"
+      puts "  Description: #{result[:description]}"
+    end
+
+    it 'creates appropriate new category when none match' do
+      result = client.categorize(commit_data, existing_categories)
+
+      # Docker-related commit should create a relevant category
+      expect(result[:category]).not_to be_nil
+      expect(result[:confidence]).to be > 50
+
+      # Should NOT be a numeric or invalid category
+      expect(result[:category]).not_to match(/^\d/)
+      expect(result[:category]).not_to match(/^#\d/)
+      expect(result[:category]).not_to match(/^\d+\.\d+/)
+
+      puts "\n[E2E Test] Claude created category: #{result[:category]} (confidence: #{result[:confidence]}%)"
+      puts "[E2E Test] Reason: #{result[:reason]}"
+    end
+
+    it 'handles commits with diverse file types' do
+      mixed_commit = {
+        hash: 'abc456',
+        subject: 'Update billing module and add tests',
+        files: [
+          'app/services/billing_service.rb',
+          'spec/services/billing_service_spec.rb',
+          'config/billing.yml'
+        ]
+      }
+
+      result = client.categorize(mixed_commit, existing_categories)
+
+      # Should recognize BILLING from both subject and file paths
+      expect(result[:category]).to eq('BILLING')
+      expect(result[:confidence]).to be > 60
+
+      puts "\n[E2E Test] Claude matched existing category: #{result[:category]} (#{result[:confidence]}%)"
+    end
+
+    it 'respects existing categories when appropriate' do
+      security_commit = {
+        hash: 'def789',
+        subject: 'Fix XSS vulnerability in user input',
+        files: ['app/controllers/users_controller.rb']
+      }
+
+      result = client.categorize(security_commit, existing_categories)
+
+      # Should match the existing SECURITY category
+      expect(result[:category]).to eq('SECURITY')
+      expect(result[:confidence]).to be > 70
+
+      puts "\n[E2E Test] Claude recognized security issue: #{result[:category]} (#{result[:confidence]}%)"
+    end
+
+    it 'rejects numeric categories even if LLM suggests them' do
+      version_commit = {
+        hash: 'test999',
+        subject: 'Release version 2.58.0',
+        files: ['CHANGELOG.md', 'package.json']
+      }
+
+      existing_categories_with_invalid = ['2.57.0', '2.58.0', 'RELEASE']
+
+      begin
+        result = client.categorize(version_commit, existing_categories_with_invalid)
+
+        # If we get here, verify it's a valid category (not a version number)
+        expect(result[:category]).not_to match(/^\d+\.\d+/)
+        expect(result[:category]).not_to match(/^#\d+/)
+
+        puts "\n[E2E Test] Claude correctly avoided numeric category: #{result[:category]}"
+      rescue LLM::BaseClient::APIError => e
+        # This is also acceptable - validation rejected the response
+        expect(e.message).to include('Invalid category')
+        puts "\n[E2E Test] Validation correctly rejected numeric category from Claude"
+      end
     end
   end
 

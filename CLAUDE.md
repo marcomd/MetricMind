@@ -194,6 +194,16 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 
 # Only load from existing JSON
 ./scripts/run.rb --skip-extraction
+
+# Skip AI enrichment (faster for large date ranges)
+./scripts/run.rb --skip-ai
+
+# Two-stage workflow: Extract huge history, then enrich recent commits
+./scripts/run.rb --skip-ai --from "10 years ago" --to "now"
+./scripts/ai_categorize_commits.rb --from "3 months ago" --to "now"
+
+# Process single repository without AI
+./scripts/run.rb mater --skip-ai
 ```
 
 ### Manual Operations
@@ -412,7 +422,7 @@ DEFAULT_TO_DATE="now"
 OUTPUT_DIR=./data/exports
 
 # AI Categorization (optional - leave empty to disable)
-AI_PROVIDER=ollama              # Options: gemini, ollama
+AI_PROVIDER=ollama              # Options: gemini, ollama, claude
 AI_TIMEOUT=30                   # Timeout in seconds
 AI_RETRIES=3                    # Number of retry attempts
 
@@ -425,6 +435,11 @@ GEMINI_TEMPERATURE=0.1
 OLLAMA_URL=http://localhost:11434
 OLLAMA_MODEL=llama2
 OLLAMA_TEMPERATURE=0.1
+
+# Claude Configuration (if using AI_PROVIDER=claude)
+CLAUDE_API_KEY=your_api_key
+CLAUDE_MODEL=claude-sonnet-4-5  # Alias (recommended) or dated: claude-sonnet-4-5-20250929
+CLAUDE_TEMPERATURE=0.1
 ```
 
 ## Schema Migrations
@@ -581,7 +596,7 @@ If your database was set up with legacy SQL files, the setup script automaticall
 3. **After loading new data**: Views refresh automatically via `run.rb` post-processing
 4. **When categorization coverage is low**:
    - First, review `v_uncategorized_commits` and update team's commit message format for better pattern matching
-   - Then, enable AI categorization by setting `AI_PROVIDER` in `.env` (gemini or ollama)
+   - Then, enable AI categorization by setting `AI_PROVIDER` in `.env` (gemini, ollama, or claude)
    - Run `./scripts/ai_categorize_commits.rb --dry-run` to preview AI categorization
 5. **AI categorization best practices**:
    - Start with `--dry-run` to preview categorizations before applying
@@ -621,7 +636,7 @@ Test database is automatically configured:
 
 **AI Categorization:**
 AI categorization is optional. Leave `AI_PROVIDER` empty to disable.
-- `AI_PROVIDER` - LLM provider: `gemini` or `ollama` (empty = disabled)
+- `AI_PROVIDER` - LLM provider: `gemini`, `ollama`, or `claude` (empty = disabled)
 - `AI_TIMEOUT` - Request timeout in seconds (default: 30)
 - `AI_RETRIES` - Number of retry attempts (default: 3)
 - `AI_DEBUG` - Enable verbose logging: `true` or `false`
@@ -635,6 +650,13 @@ AI categorization is optional. Leave `AI_PROVIDER` empty to disable.
 - `OLLAMA_URL` - Ollama server URL (default: http://localhost:11434)
 - `OLLAMA_MODEL` - Model name (default: llama2, try: mistral, codellama)
 - `OLLAMA_TEMPERATURE` - Temperature 0-2 (default: 0.1)
+
+**Claude-specific (if AI_PROVIDER=claude):**
+- `CLAUDE_API_KEY` - Anthropic API key (required)
+- `CLAUDE_MODEL` - Model alias or dated version (default: claude-sonnet-4-5)
+  - Aliases (recommended): `claude-haiku-4-5` (cheapest), `claude-sonnet-4-5` (balanced)
+  - Dated: `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`
+- `CLAUDE_TEMPERATURE` - Temperature 0-2 (default: 0.1)
 
 ## Future Development (Dashboard)
 

@@ -3,16 +3,17 @@
 require_relative 'base_client'
 require_relative 'gemini_client'
 require_relative 'ollama_client'
+require_relative 'claude_client'
 
 module LLM
   # Factory for creating LLM clients based on configuration
   # Reads AI_PROVIDER environment variable to determine which client to use
   class ClientFactory
-    SUPPORTED_PROVIDERS = %w[gemini ollama].freeze
+    SUPPORTED_PROVIDERS = %w[gemini ollama claude].freeze
 
     class << self
       # Create an LLM client based on AI_PROVIDER environment variable
-      # @param provider [String, nil] Provider name (gemini, ollama). If nil, reads from ENV['AI_PROVIDER']
+      # @param provider [String, nil] Provider name (gemini, ollama, claude). If nil, reads from ENV['AI_PROVIDER']
       # @param timeout [Integer, nil] Timeout in seconds (overrides AI_TIMEOUT env var)
       # @param retries [Integer, nil] Number of retries (overrides AI_RETRIES env var)
       # @param temperature [Float, nil] Temperature for generation (overrides provider-specific env var)
@@ -27,6 +28,8 @@ module LLM
           GeminiClient.new(timeout: timeout, retries: retries, temperature: temperature)
         when 'ollama'
           OllamaClient.new(timeout: timeout, retries: retries, temperature: temperature)
+        when 'claude'
+          ClaudeClient.new(timeout: timeout, retries: retries, temperature: temperature)
         else
           raise BaseClient::ConfigurationError, "Unsupported provider: #{provider}"
         end
@@ -74,6 +77,8 @@ module LLM
           validate_gemini_config(result)
         when 'ollama'
           validate_ollama_config(result)
+        when 'claude'
+          validate_claude_config(result)
         end
 
         result
@@ -108,6 +113,17 @@ module LLM
 
         if ENV['OLLAMA_MODEL'].nil? || ENV['OLLAMA_MODEL'].empty?
           result[:errors] << 'OLLAMA_MODEL not set (will use default: llama2)'
+        end
+      end
+
+      def validate_claude_config(result)
+        if ENV['CLAUDE_API_KEY'].nil? || ENV['CLAUDE_API_KEY'].empty?
+          result[:valid] = false
+          result[:errors] << 'CLAUDE_API_KEY environment variable is required'
+        end
+
+        if ENV['CLAUDE_MODEL'].nil? || ENV['CLAUDE_MODEL'].empty?
+          result[:errors] << 'CLAUDE_MODEL not set (will use default: claude-haiku-4-5-20251001)'
         end
       end
     end

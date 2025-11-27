@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2025-11-27
+
+### Added
+- **Claude (Anthropic) client support for AI categorization**:
+  - New `LLM::ClaudeClient` class using langchainrb with ruby-anthropic gem
+  - Follows same architecture as Gemini and Ollama clients (BaseClient pattern)
+  - Supports all categorization features: category, confidence, business_impact, reason, description
+  - Default model: `claude-haiku-4-5-20251001` (cheapest option for cost-effective testing)
+- **E2E integration tests for Claude client** (`spec/llm/integration_spec.rb`):
+  - 5 test cases covering real API calls (skipped by default)
+  - Tests for category creation, existing category matching, and validation
+  - Conditional skipping when `CLAUDE_API_KEY` not configured
+  - Follows established pattern from Ollama integration tests
+- **Comprehensive unit tests** (`spec/llm/claude_client_spec.rb`):
+  - 12 tests with mocked dependencies
+  - Configuration validation, response parsing, retry logic
+  - Category validation and error handling
+- **Ruby-anthropic gem dependency** (`~> 0.4` in Gemfile):
+  - Required for langchainrb's Anthropic provider
+  - Uses API version header: `anthropic-version: 2023-06-01`
+
+### Changed
+- **ClientFactory enhanced with Claude support**:
+  - Added `'claude'` to `SUPPORTED_PROVIDERS` array
+  - New `validate_claude_config()` method for configuration checking
+  - Factory creates ClaudeClient when `AI_PROVIDER=claude`
+- **Documentation updates**:
+  - `.env.example`: Added Claude configuration section with model recommendations
+  - `README.md`: Added Claude setup instructions (Option C)
+  - `CLAUDE.md`: Updated AI configuration with Claude-specific settings
+  - All docs recommend dated model versions over aliases for reliability
+
+### Notes
+- **Limited Claude 4.5 support**: Model aliases (`claude-haiku-4-5`, `claude-sonnet-4-5`) may cause 404 errors with ruby-anthropic gem v0.4.2
+- **Workaround**: Use dated model versions explicitly:
+  - `claude-haiku-4-5-20251001` (cheapest, recommended for testing)
+  - `claude-sonnet-4-5-20250929` (balanced, higher quality)
+- **Gem maintenance**: ruby-anthropic hasn't been updated in months; official `anthropic-sdk-ruby` gem migration planned for future release
+- **Cost optimization**: Claude Haiku 4.5 priced at $1/$5 per million tokens (cheapest option)
+- **Integration tests**: Require explicit `CLAUDE_API_KEY` in shell environment (not loaded from `.env` during tests by design)
+
+### Known Limitations
+- Claude 4.5 model aliases not fully supported; requires dated version strings
+- Regional availability of Claude 4.5 may vary by API key
+- Integration tests require manual API key export (security isolation)
+
+### Testing
+Run integration tests with:
+```bash
+CLAUDE_API_KEY=your-key bundle exec rspec spec/llm/integration_spec.rb:148
+```
+
+Run all unit tests:
+```bash
+bundle exec rspec spec/llm/claude_client_spec.rb
+```
+
+### Future Work
+- Migrate from community `ruby-anthropic` gem to official `anthropic-sdk-ruby`
+- Investigate removing langchainrb dependency for direct API integration
+- Monitor Claude 4.5 model alias support in future gem updates
+
 ## [1.5.0] - 2025-11-24
 
 ### Added

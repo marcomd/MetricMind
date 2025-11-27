@@ -579,5 +579,44 @@ RSpec.describe GitExtractor do
         expect(first_commit['description']).to be_nil
       end
     end
+
+    context 'with SKIP_AI environment variable' do
+      after do
+        ENV.delete('SKIP_AI')
+      end
+
+      it 'reads SKIP_AI=true from environment and skips AI processing' do
+        ENV['SKIP_AI'] = 'true'
+
+        extractor = described_class.new(
+          '2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir
+        )
+
+        allow(extractor).to receive(:print_summary)
+        extractor.run
+
+        json_data = JSON.parse(File.read(output_file))
+        first_commit = json_data['commits'].first
+
+        # Should NOT have AI-generated fields
+        expect(first_commit['description']).to be_nil
+        expect(first_commit['ai_confidence']).to be_nil
+      end
+
+      it 'defaults to AI enabled when SKIP_AI not set' do
+        ENV.delete('SKIP_AI')
+
+        extractor = described_class.new(
+          '2024-05-01', '2024-07-01', output_file, 'test', test_repo_dir
+        )
+
+        allow(extractor).to receive(:print_summary)
+        extractor.run
+
+        # When SKIP_AI not set, @skip_ai should default to false
+        # (AI would be enabled if AI_PROVIDER was configured)
+        expect(extractor.instance_variable_get(:@skip_ai)).to be false
+      end
+    end
   end
 end
