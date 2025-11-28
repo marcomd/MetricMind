@@ -1014,7 +1014,7 @@ ollama pull gpt-oss:20b  # In another terminal
 
 # Configure in .env
 AI_PROVIDER=ollama
-OLLAMA_URL=http://localhost:11434
+OLLAMA_API_BASE=http://localhost:11434/v1
 OLLAMA_MODEL=gpt-oss:20b
 OLLAMA_TEMPERATURE=0.1
 PREVENT_NUMERIC_CATEGORIES=true  # Prevents version numbers like "2.58.0"
@@ -1037,11 +1037,11 @@ PREVENT_NUMERIC_CATEGORIES=true  # Prevents version numbers like "2.58.0"
 # Get API key from https://console.anthropic.com/settings/keys
 
 # Configure in .env
-AI_PROVIDER=claude
-CLAUDE_API_KEY=your_api_key_here
-CLAUDE_MODEL=claude-haiku-4-5              # Recommended: Use alias (claude-haiku-4-5 cheapest, claude-sonnet-4-5 balanced)
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_api_key_here
+ANTHROPIC_MODEL=claude-haiku-4-5           # Recommended: Use alias (claude-haiku-4-5 cheapest, claude-sonnet-4-5 balanced)
                                            # Or dated: claude-haiku-4-5-20251001, claude-sonnet-4-5-20250929
-CLAUDE_TEMPERATURE=0.1
+ANTHROPIC_TEMPERATURE=0.1
 PREVENT_NUMERIC_CATEGORIES=true  # Prevents version numbers like "2.58.0"
 ```
 
@@ -1579,9 +1579,16 @@ ORDER BY month DESC;
 3. **Be specific**: List all tools used (e.g., "Claude Code and GitHub Copilot")
 4. **Regular usage**: Add AI tool info whenever applicable to build comprehensive data
 
-## Building the Dashboard on Replit
+## Use the AI from the console
 
-This section provides functional requirements and specifications for building an interactive analytics dashboard on Replit. Replit will handle the technical implementation details.
+```ruby
+require_relative 'lib/llm/client_factory'
+RubyLLM.chat(model: "gemma3", provider: :ollama, assume_model_exists: true)
+```
+
+## Building the Dashboard
+
+This section provides functional requirements and specifications for building an interactive analytics dashboard.
 
 ### Dashboard Purpose
 
@@ -1597,9 +1604,9 @@ The dashboard should provide an intuitive, visually appealing interface to explo
   - Three cards: "Avg Commits/Month", "Avg Lines/Commit", "Avg Contributors/Month"
   - Filters: repository, the period (last 3, 6, 12, 24 months, all), a checkox per committer
     - per committer means, for example, if the trend shows the 200 commits at "2025-10" for "All repositories" -> if the user clicks on the checkbox "per commmitter" and supposing the total number of committers is 45, we show 4.4 (200/45).
-- Who are the most active contributors?
-  - consider committers could have different domain e.g. foo.bar@iubenda.com and foo.bar@team.blue, but we can use the name to indentify it
-  - filters: repository, period, email (e.g. @team.blue will only compare email with this domain)
+- How am I going?
+  - give everyone the possibility to monitor themselves
+  - give a summary of the latest work
 
 ### Architecture Overview
 
@@ -1822,100 +1829,6 @@ Categories are automatically extracted from commit subjects using:
 2. Square brackets: `[CS] Fixed bug` → CS
 3. First uppercase word: `BILLING Implemented feature` → BILLING
 4. If no match: NULL (shown as "UNCATEGORIZED" in UI)
-
-### Design Requirements
-
-**Visual Style**:
-- Modern, clean interface with good use of whitespace
-- Smooth animations and transitions
-- Responsive design (works on desktop, tablet, mobile)
-- Dark mode support for reduced eye strain
-
-**Color Scheme**:
-- Primary: Blue tones for professionalism and trust
-- Secondary: Purple for accent and emphasis
-- Success: Green for positive metrics and growth
-- Warning: Orange for caution
-- Danger: Red for negative trends or issues
-- Use gradients for depth and visual interest
-
-**User Experience Principles**:
-- **Fast Loading**: Show loading states, but optimize for speed
-- **Progressive Disclosure**: Start with overview, allow drilling down
-- **Feedback**: Visual feedback for all interactions
-- **Consistency**: Consistent patterns across all views
-- **Accessibility**: Proper contrast, keyboard navigation, screen reader support
-
-### Deployment Considerations
-
-**Environment Variables**: Configure these in Replit Secrets
-- Database connection parameters
-- API base URLs (if frontend/backend are separate)
-- Any API keys for future integrations
-
-**Performance**:
-- Use database connection pooling
-- Cache frequently accessed data where appropriate
-- Implement pagination for large datasets
-- Optimize SQL queries (database already has indexes)
-
-**Security**:
-- Enable CORS appropriately
-- Validate all inputs
-- Use parameterized queries (no SQL injection)
-- Don't expose sensitive information in error messages
-
-### Success Metrics
-
-The dashboard should achieve:
-- **"WoW Factor"**: Impressive visual design that makes users excited to explore data
-- **Insights Clarity**: Users can quickly answer key questions about productivity
-- **Performance**: Page loads under 2 seconds, chart animations smooth (60fps)
-- **Usability**: New users can navigate without training
-- **Responsiveness**: Works well on devices from phone to desktop
-
-### Getting Started with Replit
-
-1. Create a new Repl on [Replit](https://replit.com)
-2. Choose appropriate template (Node.js recommended for full-stack)
-3. Connect to your existing PostgreSQL database using Replit Secrets
-4. Implement the API endpoints according to the specifications above
-5. Build the frontend views based on the functional requirements
-6. Deploy when ready using Replit's deployment features
-
-Replit will guide you through the technical implementation based on these functional requirements.
-
-## Roadmap
-
-### Phase 1: Data Pipeline ✅
-- [x] Git extraction script
-- [x] PostgreSQL schema
-- [x] Data loading script
-- [x] Multi-repository orchestration
-- [x] Aggregated views
-
-### Phase 2: Dashboard (In Progress)
-- [ ] Replit frontend setup
-- [ ] API endpoints for data queries
-- [ ] Monthly trend charts
-- [ ] Contributor leaderboard
-- [ ] Repository comparison view
-- [ ] Before/after analysis tool
-
-### Phase 3: Advanced Analytics
-- [ ] Predictive trends
-- [ ] Anomaly detection
-- [ ] Team collaboration patterns
-- [ ] Code review metrics
-- [ ] Working hours analysis
-- [ ] Language/file-type breakdown
-
-### Phase 4: Integrations
-- [ ] Jira/Linear integration (feature tracking)
-- [ ] Slack notifications
-- [ ] GitHub API integration
-- [ ] Export to PDF reports
-- [ ] BigQuery export option
 
 ## Contributing
 

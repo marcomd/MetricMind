@@ -143,7 +143,7 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
      - Creates new categories when needed or reuses existing ones
 
 2. **AI Categorization Architecture** (`lib/llm/`):
-   - **Supported Providers**: Gemini (cloud) and Ollama (local)
+   - **Supported Providers**: Gemini (cloud), Ollama (local), and Anthropic/Claude (cloud)
    - **Base Client Pattern**: Abstract `BaseClient` with timeout/retry logic
    - **Factory Pattern**: `ClientFactory` creates appropriate client based on `AI_PROVIDER` env var
    - **Categorizer**: High-level orchestrator managing database operations and LLM interactions
@@ -422,8 +422,8 @@ DEFAULT_TO_DATE="now"
 OUTPUT_DIR=./data/exports
 
 # AI Categorization (optional - leave empty to disable)
-AI_PROVIDER=ollama              # Options: gemini, ollama, claude
-AI_TIMEOUT=30                   # Timeout in seconds
+AI_PROVIDER=ollama              # Options: gemini, ollama, anthropic
+AI_TIMEOUT=120                  # Timeout in seconds (default: 120, increase for slow models)
 AI_RETRIES=3                    # Number of retry attempts
 
 # Gemini Configuration (if using AI_PROVIDER=gemini)
@@ -432,14 +432,14 @@ GEMINI_MODEL=gemini-2.0-flash-exp
 GEMINI_TEMPERATURE=0.1
 
 # Ollama Configuration (if using AI_PROVIDER=ollama)
-OLLAMA_URL=http://localhost:11434
+OLLAMA_API_BASE=http://localhost:11434/v1
 OLLAMA_MODEL=llama2
 OLLAMA_TEMPERATURE=0.1
 
-# Claude Configuration (if using AI_PROVIDER=claude)
-CLAUDE_API_KEY=your_api_key
-CLAUDE_MODEL=claude-sonnet-4-5  # Alias (recommended) or dated: claude-sonnet-4-5-20250929
-CLAUDE_TEMPERATURE=0.1
+# Anthropic Configuration (if using AI_PROVIDER=anthropic)
+ANTHROPIC_API_KEY=your_api_key
+ANTHROPIC_MODEL=claude-sonnet-4-5  # Alias (recommended) or dated: claude-sonnet-4-5-20250929
+ANTHROPIC_TEMPERATURE=0.1
 ```
 
 ## Schema Migrations
@@ -596,7 +596,7 @@ If your database was set up with legacy SQL files, the setup script automaticall
 3. **After loading new data**: Views refresh automatically via `run.rb` post-processing
 4. **When categorization coverage is low**:
    - First, review `v_uncategorized_commits` and update team's commit message format for better pattern matching
-   - Then, enable AI categorization by setting `AI_PROVIDER` in `.env` (gemini, ollama, or claude)
+   - Then, enable AI categorization by setting `AI_PROVIDER` in `.env` (gemini, ollama, or anthropic)
    - Run `./scripts/ai_categorize_commits.rb --dry-run` to preview AI categorization
 5. **AI categorization best practices**:
    - Start with `--dry-run` to preview categorizations before applying
@@ -636,8 +636,8 @@ Test database is automatically configured:
 
 **AI Categorization:**
 AI categorization is optional. Leave `AI_PROVIDER` empty to disable.
-- `AI_PROVIDER` - LLM provider: `gemini`, `ollama`, or `claude` (empty = disabled)
-- `AI_TIMEOUT` - Request timeout in seconds (default: 30)
+- `AI_PROVIDER` - LLM provider: `gemini`, `ollama`, or `anthropic` (empty = disabled)
+- `AI_TIMEOUT` - Request timeout in seconds (default: 120)
 - `AI_RETRIES` - Number of retry attempts (default: 3)
 - `AI_DEBUG` - Enable verbose logging: `true` or `false`
 
@@ -647,16 +647,16 @@ AI categorization is optional. Leave `AI_PROVIDER` empty to disable.
 - `GEMINI_TEMPERATURE` - Temperature 0-2 (default: 0.1)
 
 **Ollama-specific (if AI_PROVIDER=ollama):**
-- `OLLAMA_URL` - Ollama server URL (default: http://localhost:11434)
+- `OLLAMA_API_BASE` - Ollama server URL with /v1 suffix (default: http://localhost:11434/v1)
 - `OLLAMA_MODEL` - Model name (default: llama2, try: mistral, codellama)
 - `OLLAMA_TEMPERATURE` - Temperature 0-2 (default: 0.1)
 
-**Claude-specific (if AI_PROVIDER=claude):**
-- `CLAUDE_API_KEY` - Anthropic API key (required)
-- `CLAUDE_MODEL` - Model alias or dated version (default: claude-sonnet-4-5)
+**Anthropic-specific (if AI_PROVIDER=anthropic):**
+- `ANTHROPIC_API_KEY` - Anthropic API key (required)
+- `ANTHROPIC_MODEL` - Model alias or dated version (default: claude-haiku-4-5-20251001)
   - Aliases (recommended): `claude-haiku-4-5` (cheapest), `claude-sonnet-4-5` (balanced)
   - Dated: `claude-haiku-4-5-20251001`, `claude-sonnet-4-5-20250929`
-- `CLAUDE_TEMPERATURE` - Temperature 0-2 (default: 0.1)
+- `ANTHROPIC_TEMPERATURE` - Temperature 0-2 (default: 0.1)
 
 ## Future Development (Dashboard)
 

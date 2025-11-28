@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 require_relative '../../lib/llm/ollama_client'
-require_relative '../../lib/llm/claude_client'
+require_relative '../../lib/llm/anthropic_client'
 require_relative '../../lib/llm/categorizer'
 require 'socket'
 
@@ -21,14 +21,14 @@ RSpec.describe 'AI Categorization Integration', :integration do
     before do
       skip 'Ollama is not running on localhost:11434' unless ollama_available?
 
-      ENV['OLLAMA_URL'] = 'http://localhost:11434'
+      ENV['OLLAMA_API_BASE'] = 'http://localhost:11434/v1'
       ENV['OLLAMA_MODEL'] = 'llama3.2' # or 'llama2' depending on what's installed
       ENV['OLLAMA_TEMPERATURE'] = '0.1'
       ENV['AI_TIMEOUT'] = '60' # Give it more time for integration test
     end
 
     after do
-      ENV.delete('OLLAMA_URL')
+      ENV.delete('OLLAMA_API_BASE')
       ENV.delete('OLLAMA_MODEL')
       ENV.delete('OLLAMA_TEMPERATURE')
       ENV.delete('AI_TIMEOUT')
@@ -145,10 +145,10 @@ RSpec.describe 'AI Categorization Integration', :integration do
     end
   end
 
-  describe 'ClaudeClient real API call' do
-    # Helper to check if Claude API key is configured
-    def claude_available?
-      api_key = ENV['CLAUDE_API_KEY']
+  describe 'AnthropicClient real API call' do
+    # Helper to check if Anthropic API key is configured
+    def anthropic_available?
+      api_key = ENV['ANTHROPIC_API_KEY']
       !api_key.nil? &&
         !api_key.empty? &&
         api_key != 'test_api_key' &&
@@ -156,19 +156,19 @@ RSpec.describe 'AI Categorization Integration', :integration do
     end
 
     before do
-      skip 'Claude API key not configured (set CLAUDE_API_KEY environment variable)' unless claude_available?
-      ENV['CLAUDE_MODEL'] = 'claude-haiku-4-5-20251001'
-      ENV['CLAUDE_TEMPERATURE'] = '0.1'
+      skip 'Anthropic API key not configured (set ANTHROPIC_API_KEY environment variable)' unless anthropic_available?
+      ENV['ANTHROPIC_MODEL'] = 'claude-haiku-4-5-20251001'
+      ENV['ANTHROPIC_TEMPERATURE'] = '0.1'
       ENV['AI_TIMEOUT'] = '60'
     end
 
     after do
-      ENV.delete('CLAUDE_MODEL')
-      ENV.delete('CLAUDE_TEMPERATURE')
+      ENV.delete('ANTHROPIC_MODEL')
+      ENV.delete('ANTHROPIC_TEMPERATURE')
       ENV.delete('AI_TIMEOUT')
     end
 
-    let(:client) { LLM::ClaudeClient.new }
+    let(:client) { LLM::AnthropicClient.new }
     let(:commit_data) do
       {
         hash: 'test123',
@@ -178,7 +178,7 @@ RSpec.describe 'AI Categorization Integration', :integration do
     end
     let(:existing_categories) { %w[SECURITY BILLING API] }
 
-    it 'successfully categorizes a commit using real Claude API' do
+    it 'successfully categorizes a commit using real Anthropic API' do
       result = client.categorize(commit_data, existing_categories)
 
       # Verify structure
@@ -197,7 +197,7 @@ RSpec.describe 'AI Categorization Integration', :integration do
       expect(result[:reason]).to be_a(String)
       expect(result[:description]).to be_a(String)
 
-      puts "\n[E2E Test] Claude Response:"
+      puts "\n[E2E Test] Anthropic Response:"
       puts "  Category: #{result[:category]} (confidence: #{result[:confidence]}%)"
       puts "  Business Impact: #{result[:business_impact]}%"
       puts "  Reason: #{result[:reason]}"
@@ -216,7 +216,7 @@ RSpec.describe 'AI Categorization Integration', :integration do
       expect(result[:category]).not_to match(/^#\d/)
       expect(result[:category]).not_to match(/^\d+\.\d+/)
 
-      puts "\n[E2E Test] Claude created category: #{result[:category]} (confidence: #{result[:confidence]}%)"
+      puts "\n[E2E Test] Anthropic created category: #{result[:category]} (confidence: #{result[:confidence]}%)"
       puts "[E2E Test] Reason: #{result[:reason]}"
     end
 
@@ -237,7 +237,7 @@ RSpec.describe 'AI Categorization Integration', :integration do
       expect(result[:category]).to eq('BILLING')
       expect(result[:confidence]).to be > 60
 
-      puts "\n[E2E Test] Claude matched existing category: #{result[:category]} (#{result[:confidence]}%)"
+      puts "\n[E2E Test] Anthropic matched existing category: #{result[:category]} (#{result[:confidence]}%)"
     end
 
     it 'respects existing categories when appropriate' do
@@ -253,7 +253,7 @@ RSpec.describe 'AI Categorization Integration', :integration do
       expect(result[:category]).to eq('SECURITY')
       expect(result[:confidence]).to be > 70
 
-      puts "\n[E2E Test] Claude recognized security issue: #{result[:category]} (#{result[:confidence]}%)"
+      puts "\n[E2E Test] Anthropic recognized security issue: #{result[:category]} (#{result[:confidence]}%)"
     end
 
     it 'rejects numeric categories even if LLM suggests them' do
@@ -272,11 +272,11 @@ RSpec.describe 'AI Categorization Integration', :integration do
         expect(result[:category]).not_to match(/^\d+\.\d+/)
         expect(result[:category]).not_to match(/^#\d+/)
 
-        puts "\n[E2E Test] Claude correctly avoided numeric category: #{result[:category]}"
+        puts "\n[E2E Test] Anthropic correctly avoided numeric category: #{result[:category]}"
       rescue LLM::BaseClient::APIError => e
         # This is also acceptable - validation rejected the response
         expect(e.message).to include('Invalid category')
-        puts "\n[E2E Test] Validation correctly rejected numeric category from Claude"
+        puts "\n[E2E Test] Validation correctly rejected numeric category from Anthropic"
       end
     end
   end

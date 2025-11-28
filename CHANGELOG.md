@@ -5,6 +5,65 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2025-11-28
+
+### Changed
+- **Replaced langchainrb with ruby_llm gem**:
+  - Migrated all LLM clients (Ollama, Gemini, Anthropic) from langchainrb to ruby_llm
+  - Simplified response handling: `response.content` instead of complex provider-specific extraction
+  - Unified API across all providers with consistent `RubyLLM.chat(model:).with_temperature().ask(prompt)` interface
+  - Reduced dependencies: ruby_llm has minimal deps (Faraday, Zeitwerk, Marcel)
+- **Renamed ClaudeClient to AnthropicClient**:
+  - File: `lib/llm/claude_client.rb` → `lib/llm/anthropic_client.rb`
+  - Class: `ClaudeClient` → `AnthropicClient`
+  - Provider name: `AI_PROVIDER=claude` → `AI_PROVIDER=anthropic`
+  - Updated all tests and documentation accordingly
+- **Environment variable naming standardization**:
+  - `CLAUDE_API_KEY` → `ANTHROPIC_API_KEY`
+  - `CLAUDE_MODEL` → `ANTHROPIC_MODEL`
+  - `CLAUDE_TEMPERATURE` → `ANTHROPIC_TEMPERATURE`
+  - `OLLAMA_URL` → `OLLAMA_API_BASE` (now includes `/v1` suffix for OpenAI-compatible API)
+- **Increased default AI timeout**:
+  - `AI_TIMEOUT` default changed from 30 to 120 seconds
+  - Improves reliability for local Ollama instances on slower hardware
+  - Still configurable via environment variable for custom timeouts
+
+### Fixed
+- **RubyLLM configuration initialization**:
+  - RubyLLM now configures automatically at load time (when `client_factory.rb` is required)
+  - Fixed issue where `RubyLLM.chat` failed in console with "Missing configuration" error
+  - Configuration still idempotent via `@configured` flag
+- **Ollama custom model support**:
+  - Added `assume_model_exists: true` to Ollama client
+  - Allows use of custom Ollama models not in ruby_llm's internal registry
+  - Prevents "Unknown model" errors for user-installed models
+
+### Migration Guide
+If upgrading from 1.6.0, update your `.env` file:
+```bash
+# Old (1.6.0)
+AI_PROVIDER=claude
+CLAUDE_API_KEY=your_key
+CLAUDE_MODEL=claude-haiku-4-5-20251001
+CLAUDE_TEMPERATURE=0.1
+OLLAMA_URL=http://localhost:11434
+
+# New (1.7.0)
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=your_key
+ANTHROPIC_MODEL=claude-haiku-4-5-20251001
+ANTHROPIC_TEMPERATURE=0.1
+OLLAMA_API_BASE=http://localhost:11434/v1
+```
+
+Run `bundle install` after upgrading to install ruby_llm.
+
+### Testing
+All 101 unit tests pass. Integration tests require real API keys/services:
+```bash
+bundle exec rspec spec/llm/ --exclude-pattern '**/integration_spec.rb'
+```
+
 ## [1.6.0] - 2025-11-27
 
 ### Added

@@ -7,36 +7,34 @@ RSpec.describe LLM::OllamaClient do
   let(:client) { described_class.new }
 
   before do
-    ENV['OLLAMA_URL'] = 'http://localhost:11434'
+    ENV['OLLAMA_API_BASE'] = 'http://localhost:11434/v1'
     ENV['OLLAMA_MODEL'] = 'llama3.2'
     ENV['OLLAMA_TEMPERATURE'] = '0.1'
   end
 
   after do
-    ENV.delete('OLLAMA_URL')
+    ENV.delete('OLLAMA_API_BASE')
     ENV.delete('OLLAMA_MODEL')
     ENV.delete('OLLAMA_TEMPERATURE')
   end
 
   describe '#initialize' do
     it 'uses environment variables for configuration' do
-      expect(client.url).to eq('http://localhost:11434')
       expect(client.model).to eq('llama3.2')
       expect(client.temperature).to eq(0.1)
     end
 
     it 'uses defaults if env vars not set' do
-      ENV.delete('OLLAMA_URL')
+      ENV.delete('OLLAMA_API_BASE')
       ENV.delete('OLLAMA_MODEL')
 
       default_client = described_class.new
 
-      expect(default_client.url).to eq('http://localhost:11434')
       expect(default_client.model).to eq('llama2')
     end
 
     it 'validates URL format' do
-      ENV['OLLAMA_URL'] = 'invalid-url'
+      ENV['OLLAMA_API_BASE'] = 'invalid-url'
 
       expect do
         described_class.new
@@ -63,22 +61,19 @@ RSpec.describe LLM::OllamaClient do
     let(:existing_categories) { %w[BILLING CS API] }
 
     let(:mock_response) do
-      {
-        'message' => {
-          'content' => <<~RESPONSE
-            CATEGORY: BILLING
-            CONFIDENCE: 90
-            REASON: Modified billing payment service
-          RESPONSE
-        }
-      }
+      instance_double(RubyLLM::Message, content: <<~RESPONSE)
+        CATEGORY: BILLING
+        CONFIDENCE: 90
+        REASON: Modified billing payment service
+      RESPONSE
     end
 
+    let(:mock_chat) { instance_double('RubyLLM::Chat') }
+
     before do
-      # Mock the Langchain Ollama client
-      mock_llm = instance_double(Langchain::LLM::Ollama)
-      allow(Langchain::LLM::Ollama).to receive(:new).and_return(mock_llm)
-      allow(mock_llm).to receive(:chat).and_return(mock_response)
+      allow(RubyLLM).to receive(:chat).and_return(mock_chat)
+      allow(mock_chat).to receive(:with_temperature).and_return(mock_chat)
+      allow(mock_chat).to receive(:ask).and_return(mock_response)
     end
 
     it 'returns categorization result' do
@@ -90,11 +85,7 @@ RSpec.describe LLM::OllamaClient do
     end
 
     it 'includes commit details in prompt' do
-      mock_llm = instance_double(Langchain::LLM::Ollama)
-      allow(Langchain::LLM::Ollama).to receive(:new).and_return(mock_llm)
-
-      expect(mock_llm).to receive(:chat) do |args|
-        prompt = args[:messages].first[:content]
+      expect(mock_chat).to receive(:ask) do |prompt|
         expect(prompt).to include('Fix payment bug')
         expect(prompt).to include('abc123')
         expect(prompt).to include('app/services/billing/payment.rb')
@@ -104,30 +95,9 @@ RSpec.describe LLM::OllamaClient do
       client.categorize(commit_data, existing_categories)
     end
 
-    it 'handles string response format' do
-      mock_llm = instance_double(Langchain::LLM::Ollama)
-      allow(Langchain::LLM::Ollama).to receive(:new).and_return(mock_llm)
-
-      string_response = <<~RESPONSE
-        CATEGORY: API
-        CONFIDENCE: 85
-        REASON: API endpoint changes
-      RESPONSE
-
-      allow(mock_llm).to receive(:chat).and_return(string_response)
-
-      result = client.categorize(commit_data, existing_categories)
-
-      expect(result[:category]).to eq('API')
-      expect(result[:confidence]).to eq(85)
-    end
-
     it 'retries on connection failure' do
-      mock_llm = instance_double(Langchain::LLM::Ollama)
-      allow(Langchain::LLM::Ollama).to receive(:new).and_return(mock_llm)
-
       attempts = 0
-      allow(mock_llm).to receive(:chat) do
+      allow(mock_chat).to receive(:ask) do
         attempts += 1
         attempts < 2 ? raise(Errno::ECONNREFUSED) : mock_response
       end
@@ -139,9 +109,7 @@ RSpec.describe LLM::OllamaClient do
     end
 
     it 'raises APIError after max retries' do
-      mock_llm = instance_double(Langchain::LLM::Ollama)
-      allow(Langchain::LLM::Ollama).to receive(:new).and_return(mock_llm)
-      allow(mock_llm).to receive(:chat).and_raise(Errno::ECONNREFUSED)
+      allow(mock_chat).to receive(:ask).and_raise(Errno::ECONNREFUSED)
 
       expect do
         client.categorize(commit_data, existing_categories)
@@ -149,20 +117,13 @@ RSpec.describe LLM::OllamaClient do
     end
 
     it 'rejects invalid category from LLM' do
-      mock_llm = instance_double(Langchain::LLM::Ollama)
-      allow(Langchain::LLM::Ollama).to receive(:new).and_return(mock_llm)
+      invalid_response = instance_double(RubyLLM::Message, content: <<~RESPONSE)
+        CATEGORY: 2.58.0
+        CONFIDENCE: 90
+        REASON: Version number
+      RESPONSE
 
-      invalid_response = {
-        'message' => {
-          'content' => <<~RESPONSE
-            CATEGORY: 2.58.0
-            CONFIDENCE: 90
-            REASON: Version number
-          RESPONSE
-        }
-      }
-
-      allow(mock_llm).to receive(:chat).and_return(invalid_response)
+      allow(mock_chat).to receive(:ask).and_return(invalid_response)
 
       expect do
         client.categorize(commit_data, existing_categories)

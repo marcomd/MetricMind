@@ -1,25 +1,40 @@
 # frozen_string_literal: true
 
+require 'ruby_llm'
 require_relative 'base_client'
 require_relative 'gemini_client'
 require_relative 'ollama_client'
-require_relative 'claude_client'
+require_relative 'anthropic_client'
 
 module LLM
   # Factory for creating LLM clients based on configuration
   # Reads AI_PROVIDER environment variable to determine which client to use
   class ClientFactory
-    SUPPORTED_PROVIDERS = %w[gemini ollama claude].freeze
+    SUPPORTED_PROVIDERS = %w[gemini ollama anthropic].freeze
 
     class << self
+      # Configure RubyLLM with API keys and settings
+      # Should be called once at application startup
+      def configure_ruby_llm
+        RubyLLM.configure do |config|
+          config.anthropic_api_key = ENV['ANTHROPIC_API_KEY'] if ENV['ANTHROPIC_API_KEY']
+          config.gemini_api_key = ENV['GEMINI_API_KEY'] if ENV['GEMINI_API_KEY']
+          config.ollama_api_base = ENV.fetch('OLLAMA_API_BASE', 'http://localhost:11434/v1')
+          config.request_timeout = ENV.fetch('AI_TIMEOUT', '120').to_i
+          config.max_retries = ENV.fetch('AI_RETRIES', '3').to_i
+        end
+        @configured = true
+      end
+
       # Create an LLM client based on AI_PROVIDER environment variable
-      # @param provider [String, nil] Provider name (gemini, ollama, claude). If nil, reads from ENV['AI_PROVIDER']
+      # @param provider [String, nil] Provider name (gemini, ollama, anthropic). If nil, reads from ENV['AI_PROVIDER']
       # @param timeout [Integer, nil] Timeout in seconds (overrides AI_TIMEOUT env var)
       # @param retries [Integer, nil] Number of retries (overrides AI_RETRIES env var)
       # @param temperature [Float, nil] Temperature for generation (overrides provider-specific env var)
       # @return [BaseClient] Configured LLM client
       # @raise [BaseClient::ConfigurationError] If provider is invalid or not configured
       def create(provider: nil, timeout: nil, retries: nil, temperature: nil)
+        ensure_configured
         provider ||= ENV.fetch('AI_PROVIDER', 'ollama').downcase
         validate_provider!(provider)
 
@@ -28,8 +43,8 @@ module LLM
           GeminiClient.new(timeout: timeout, retries: retries, temperature: temperature)
         when 'ollama'
           OllamaClient.new(timeout: timeout, retries: retries, temperature: temperature)
-        when 'claude'
-          ClaudeClient.new(timeout: timeout, retries: retries, temperature: temperature)
+        when 'anthropic'
+          AnthropicClient.new(timeout: timeout, retries: retries, temperature: temperature)
         else
           raise BaseClient::ConfigurationError, "Unsupported provider: #{provider}"
         end
@@ -77,14 +92,18 @@ module LLM
           validate_gemini_config(result)
         when 'ollama'
           validate_ollama_config(result)
-        when 'claude'
-          validate_claude_config(result)
+        when 'anthropic'
+          validate_anthropic_config(result)
         end
 
         result
       end
 
       private
+
+      def ensure_configured
+        configure_ruby_llm unless @configured
+      end
 
       def validate_provider!(provider)
         return if SUPPORTED_PROVIDERS.include?(provider)
@@ -105,10 +124,10 @@ module LLM
       end
 
       def validate_ollama_config(result)
-        url = ENV.fetch('OLLAMA_URL', 'http://localhost:11434')
+        url = ENV.fetch('OLLAMA_API_BASE', 'http://localhost:11434/v1')
         unless url.match?(%r{^https?://})
           result[:valid] = false
-          result[:errors] << "OLLAMA_URL must start with http:// or https://, got: #{url}"
+          result[:errors] << "OLLAMA_API_BASE must start with http:// or https://, got: #{url}"
         end
 
         if ENV['OLLAMA_MODEL'].nil? || ENV['OLLAMA_MODEL'].empty?
@@ -116,16 +135,20 @@ module LLM
         end
       end
 
-      def validate_claude_config(result)
-        if ENV['CLAUDE_API_KEY'].nil? || ENV['CLAUDE_API_KEY'].empty?
+      def validate_anthropic_config(result)
+        if ENV['ANTHROPIC_API_KEY'].nil? || ENV['ANTHROPIC_API_KEY'].empty?
           result[:valid] = false
-          result[:errors] << 'CLAUDE_API_KEY environment variable is required'
+          result[:errors] << 'ANTHROPIC_API_KEY environment variable is required'
         end
 
-        if ENV['CLAUDE_MODEL'].nil? || ENV['CLAUDE_MODEL'].empty?
-          result[:errors] << 'CLAUDE_MODEL not set (will use default: claude-haiku-4-5-20251001)'
+        if ENV['ANTHROPIC_MODEL'].nil? || ENV['ANTHROPIC_MODEL'].empty?
+          result[:errors] << 'ANTHROPIC_MODEL not set (will use default: claude-haiku-4-5-20251001)'
         end
       end
     end
   end
+
+  # Configure RubyLLM at load time so it can be used directly
+  # (e.g., RubyLLM.chat in bundle console without going through ClientFactory)
+  ClientFactory.configure_ruby_llm
 end

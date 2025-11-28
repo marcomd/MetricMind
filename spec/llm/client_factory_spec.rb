@@ -32,13 +32,13 @@ RSpec.describe LLM::ClientFactory do
     context 'with ollama provider' do
       before do
         ENV['AI_PROVIDER'] = 'ollama'
-        ENV['OLLAMA_URL'] = 'http://localhost:11434'
+        ENV['OLLAMA_API_BASE'] = 'http://localhost:11434/v1'
         ENV['OLLAMA_MODEL'] = 'llama2'
       end
 
       after do
         ENV.delete('AI_PROVIDER')
-        ENV.delete('OLLAMA_URL')
+        ENV.delete('OLLAMA_API_BASE')
         ENV.delete('OLLAMA_MODEL')
       end
 
@@ -53,27 +53,27 @@ RSpec.describe LLM::ClientFactory do
       end
     end
 
-    context 'with claude provider' do
+    context 'with anthropic provider' do
       before do
-        ENV['AI_PROVIDER'] = 'claude'
-        ENV['CLAUDE_API_KEY'] = 'test_key_123'
-        ENV['CLAUDE_MODEL'] = 'claude-sonnet-4-5'
+        ENV['AI_PROVIDER'] = 'anthropic'
+        ENV['ANTHROPIC_API_KEY'] = 'test_key_123'
+        ENV['ANTHROPIC_MODEL'] = 'claude-sonnet-4-5'
       end
 
       after do
         ENV.delete('AI_PROVIDER')
-        ENV.delete('CLAUDE_API_KEY')
-        ENV.delete('CLAUDE_MODEL')
+        ENV.delete('ANTHROPIC_API_KEY')
+        ENV.delete('ANTHROPIC_MODEL')
       end
 
-      it 'creates a ClaudeClient' do
+      it 'creates an AnthropicClient' do
         client = described_class.create
-        expect(client).to be_a(LLM::ClaudeClient)
+        expect(client).to be_a(LLM::AnthropicClient)
       end
 
       it 'accepts explicit provider parameter' do
-        client = described_class.create(provider: 'claude')
-        expect(client).to be_a(LLM::ClaudeClient)
+        client = described_class.create(provider: 'anthropic')
+        expect(client).to be_a(LLM::AnthropicClient)
       end
     end
 
@@ -113,13 +113,13 @@ RSpec.describe LLM::ClientFactory do
     context 'with custom parameters' do
       before do
         ENV['AI_PROVIDER'] = 'ollama'
-        ENV['OLLAMA_URL'] = 'http://localhost:11434'
+        ENV['OLLAMA_API_BASE'] = 'http://localhost:11434/v1'
         ENV['OLLAMA_MODEL'] = 'llama2'
       end
 
       after do
         ENV.delete('AI_PROVIDER')
-        ENV.delete('OLLAMA_URL')
+        ENV.delete('OLLAMA_API_BASE')
         ENV.delete('OLLAMA_MODEL')
       end
 
@@ -150,8 +150,8 @@ RSpec.describe LLM::ClientFactory do
       end
     end
 
-    context 'when AI_PROVIDER is set to claude' do
-      before { ENV['AI_PROVIDER'] = 'claude' }
+    context 'when AI_PROVIDER is set to anthropic' do
+      before { ENV['AI_PROVIDER'] = 'anthropic' }
       after { ENV.delete('AI_PROVIDER') }
 
       it 'returns true' do
@@ -195,8 +195,8 @@ RSpec.describe LLM::ClientFactory do
       expect(described_class.supported_providers).to include('ollama')
     end
 
-    it 'includes claude' do
-      expect(described_class.supported_providers).to include('claude')
+    it 'includes anthropic' do
+      expect(described_class.supported_providers).to include('anthropic')
     end
 
     it 'returns an array' do
@@ -223,33 +223,33 @@ RSpec.describe LLM::ClientFactory do
       end
     end
 
-    context 'with valid claude configuration' do
+    context 'with valid anthropic configuration' do
       before do
-        ENV['CLAUDE_API_KEY'] = 'test_key'
-        ENV['CLAUDE_MODEL'] = 'claude-sonnet-4-5'
+        ENV['ANTHROPIC_API_KEY'] = 'test_key'
+        ENV['ANTHROPIC_MODEL'] = 'claude-sonnet-4-5'
       end
 
       after do
-        ENV.delete('CLAUDE_API_KEY')
-        ENV.delete('CLAUDE_MODEL')
+        ENV.delete('ANTHROPIC_API_KEY')
+        ENV.delete('ANTHROPIC_MODEL')
       end
 
       it 'returns valid result' do
-        result = described_class.validate_configuration(provider: 'claude')
+        result = described_class.validate_configuration(provider: 'anthropic')
         expect(result[:valid]).to be true
         expect(result[:errors]).to be_empty
       end
     end
 
-    context 'with missing claude API key' do
+    context 'with missing anthropic API key' do
       before do
-        ENV.delete('CLAUDE_API_KEY')
+        ENV.delete('ANTHROPIC_API_KEY')
       end
 
       it 'returns invalid result with error' do
-        result = described_class.validate_configuration(provider: 'claude')
+        result = described_class.validate_configuration(provider: 'anthropic')
         expect(result[:valid]).to be false
-        expect(result[:errors]).to include(/CLAUDE_API_KEY/)
+        expect(result[:errors]).to include(/ANTHROPIC_API_KEY/)
       end
     end
 

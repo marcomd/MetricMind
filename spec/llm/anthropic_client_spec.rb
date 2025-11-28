@@ -1,52 +1,52 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
-require_relative '../../lib/llm/gemini_client'
+require_relative '../../lib/llm/anthropic_client'
 
-RSpec.describe LLM::GeminiClient do
+RSpec.describe LLM::AnthropicClient do
   let(:api_key) { 'test_api_key_12345' }
   let(:client) { described_class.new }
 
   before do
-    ENV['GEMINI_API_KEY'] = api_key
-    ENV['GEMINI_MODEL'] = 'gemini-2.0-flash-exp'
-    ENV['GEMINI_TEMPERATURE'] = '0.1'
+    ENV['ANTHROPIC_API_KEY'] = api_key
+    ENV['ANTHROPIC_MODEL'] = 'claude-haiku-4-5-20251001'
+    ENV['ANTHROPIC_TEMPERATURE'] = '0.1'
   end
 
   after do
-    ENV.delete('GEMINI_API_KEY')
-    ENV.delete('GEMINI_MODEL')
-    ENV.delete('GEMINI_TEMPERATURE')
+    ENV.delete('ANTHROPIC_API_KEY')
+    ENV.delete('ANTHROPIC_MODEL')
+    ENV.delete('ANTHROPIC_TEMPERATURE')
   end
 
   describe '#initialize' do
     it 'uses environment variables for configuration' do
-      expect(client.model).to eq('gemini-2.0-flash-exp')
+      expect(client.model).to eq('claude-haiku-4-5-20251001')
       expect(client.temperature).to eq(0.1)
     end
 
     it 'uses defaults if env vars not set' do
-      ENV.delete('GEMINI_MODEL')
+      ENV.delete('ANTHROPIC_MODEL')
 
       default_client = described_class.new
 
-      expect(default_client.model).to eq('gemini-2.0-flash-exp')
+      expect(default_client.model).to eq('claude-haiku-4-5-20251001')
     end
 
     it 'requires API key' do
-      ENV.delete('GEMINI_API_KEY')
+      ENV.delete('ANTHROPIC_API_KEY')
 
       expect do
         described_class.new
-      end.to raise_error(LLM::BaseClient::ConfigurationError, /GEMINI_API_KEY/)
+      end.to raise_error(LLM::BaseClient::ConfigurationError, /ANTHROPIC_API_KEY/)
     end
 
     it 'rejects empty API key' do
-      ENV['GEMINI_API_KEY'] = ''
+      ENV['ANTHROPIC_API_KEY'] = ''
 
       expect do
         described_class.new
-      end.to raise_error(LLM::BaseClient::ConfigurationError, /GEMINI_API_KEY/)
+      end.to raise_error(LLM::BaseClient::ConfigurationError, /ANTHROPIC_API_KEY/)
     end
   end
 
@@ -65,7 +65,9 @@ RSpec.describe LLM::GeminiClient do
       instance_double(RubyLLM::Message, content: <<~RESPONSE)
         CATEGORY: SECURITY
         CONFIDENCE: 95
+        BUSINESS_IMPACT: 85
         REASON: Added security-related configuration
+        DESCRIPTION: This commit adds security headers to improve the application's security posture. The changes include configuring HTTP security headers and adding corresponding tests.
       RESPONSE
     end
 
@@ -82,7 +84,9 @@ RSpec.describe LLM::GeminiClient do
 
       expect(result[:category]).to eq('SECURITY')
       expect(result[:confidence]).to eq(95)
+      expect(result[:business_impact]).to eq(85)
       expect(result[:reason]).to eq('Added security-related configuration')
+      expect(result[:description]).to include('security headers')
     end
 
     it 'includes commit details in prompt' do
