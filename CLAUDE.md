@@ -58,38 +58,38 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Data Pipeline (ETL Flow)
 
 ```
-Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI) → Views → Dashboard
+Git Repos → Extract + Categorize (JSON) → Load (PostgreSQL) → Views → Dashboard
 ```
 
-1. **Extract**: `git_extract_to_json.rb` reads git history, outputs JSON with commit metadata
+1. **Extract + Categorize**: `git_extract_to_json.rb` reads git history, outputs JSON with commit metadata
+   - AI categorization happens during extraction (if `AI_PROVIDER` is configured)
+   - Uses commit subject, file paths, and diff content for accurate categorization
+   - Generates category, description, confidence, and business_impact per commit
 2. **Load**: `load_json_to_db.rb` inserts JSON data into PostgreSQL tables
-3. **Categorize**: Two-stage categorization:
-   - **Pattern-based** (`categorize_commits.rb`): Extracts categories from commit subjects using patterns
-   - **AI-powered** (`ai_categorize_commits.rb`): Uses LLM to categorize remaining commits based on subject + file paths
-4. **Views**: Pre-computed aggregations (daily, weekly, monthly) for fast queries
-5. **Dashboard**: (Coming soon) Replit frontend visualizing metrics
+3. **Views**: Pre-computed aggregations (daily, weekly, monthly) for fast queries
+4. **Dashboard**: (Coming soon) Replit frontend visualizing metrics
 
 ### Database Schema
 
 **Tables:**
 - `repositories`: Metadata about tracked repos
 - `commits`: Per-commit granular data with unique constraint on `(repository_id, hash)`
-- `categories`: Approved business domain categories for consistent categorization
-  - `weight` (INTEGER 0-100): Category-level weight (default 100). Admin can adjust to de-prioritize categories.
 
 **Key Columns in `commits`:**
 - `category` (VARCHAR(100)): Business domain extracted from commit (NULL = uncategorized)
-  - Extracted using pattern matching OR AI-powered categorization
-- `ai_confidence` (SMALLINT 0-100): Confidence score for AI-generated categories (NULL = pattern-matched or uncategorized)
+  - Extracted during git extraction using AI categorization
+- `ai_confidence` (SMALLINT 0-100): Confidence score for AI-generated categories (NULL = uncategorized)
   - Lower scores may indicate need for manual review
-- `weight` (INTEGER 0-100): Commit validity weight (0 = reverted, 100 = valid, or synced from category weight)
+- `weight` (INTEGER 0-100): Commit validity weight (0 = reverted, 100 = valid)
 - `ai_tools` (VARCHAR(255)): AI tools used during development
+- `description` (TEXT): AI-generated description of the commit
+- `business_impact` (SMALLINT 0-100): Business impact score (LOW 0-50, MEDIUM 51-99, HIGH 100)
 
 **Views:**
 - Standard: `v_daily_stats_by_repo`, `v_weekly_stats_by_repo`, `mv_monthly_stats_by_repo` (materialized)
   - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`
 - Category: `v_category_stats`, `v_category_by_repo`, `mv_monthly_category_stats` (materialized)
-  - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`
+  - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`
 - AI Tools: `v_ai_tools_stats`, `v_ai_tools_by_repo`
   - Include: `effective_commits`, `avg_weight`, `weight_efficiency_pct`
 - Personal Performance: `v_daily_stats_by_author`, `v_weekly_stats_by_author`, `mv_monthly_stats_by_author` (materialized)
@@ -113,14 +113,12 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 
 **`scripts/run.rb`** - Main workflow orchestrator:
 - Reads `config/repositories.json` for repository list
-- For each enabled repo: Extract → Load → **Post-processing**
+- For each enabled repo: Extract (with AI categorization) → Load → Post-processing
+- AI categorization happens during extraction (if `AI_PROVIDER` configured)
 - Post-processing workflow (automatic):
-  1. Pattern-based categorization (`categorize_commits.rb`)
-  2. AI-powered categorization (`ai_categorize_commits.rb` - only if AI_PROVIDER configured)
-  3. Weight calculation for revert detection (`calculate_commit_weights.rb`)
-  4. **Category weight synchronization** (`sync_commit_weights_from_categories.rb`)
-  5. Refresh materialized views
-- Supports flags: `--clean`, `--skip-extraction`, `--skip-load`, `--from DATE`, `--to DATE`
+  1. Weight calculation for revert detection (`calculate_commit_weights.rb`)
+  2. Refresh materialized views
+- Supports flags: `--clean`, `--skip-extraction`, `--skip-load`, `--skip-ai`, `--from DATE`, `--to DATE`
 - Single repo mode: `./scripts/run.rb mater`
 
 **`scripts/setup.rb`** - One-time setup:
@@ -129,25 +127,21 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 
 ### Critical Implementation Details
 
-1. **Two-Stage Categorization Workflow**:
-   - **Stage 1 - Pattern Matching** (`categorize_commits.rb`): Fast, rule-based extraction
-     - Pipe delimiter: `BILLING | Fix bug` → BILLING
-     - Square brackets: `[CS] Update widget` → CS
-     - First uppercase word: `BILLING Implement feature` → BILLING
-     - Ignores common verbs: MERGE, FIX, ADD, UPDATE, REMOVE, DELETE
-   - **Stage 2 - AI Categorization** (`ai_categorize_commits.rb`): LLM-based categorization for remaining commits
-     - Only processes commits with `category IS NULL` (pattern matching failed)
-     - Uses file paths from JSON exports as strong signals (e.g., `app/jobs/billing/*` → BILLING)
-     - Fetches existing categories from `categories` table to ensure consistency
-     - Stores confidence score (0-100) in `ai_confidence` column
-     - Creates new categories when needed or reuses existing ones
+1. **Extraction-Time AI Categorization**:
+   - AI categorization happens during git extraction (`git_extract_to_json.rb`)
+   - Uses commit subject, file paths, and diff content for accurate categorization
+   - Generates: category, description, confidence (0-100), and business_impact (0-100)
+   - **Business Impact Scoring**:
+     - LOW (0-50): Low-value work (typos, formatting, minor tweaks)
+     - MEDIUM (51-99): Moderate business value
+     - HIGH (100): Default for typical commits - features, bug fixes, improvements
+   - Existing categories loaded from `commits` table for consistency
 
 2. **AI Categorization Architecture** (`lib/llm/`):
    - **Supported Providers**: Gemini (cloud), Ollama (local), and Anthropic/Claude (cloud)
    - **Base Client Pattern**: Abstract `BaseClient` with timeout/retry logic
    - **Factory Pattern**: `ClientFactory` creates appropriate client based on `AI_PROVIDER` env var
-   - **Categorizer**: High-level orchestrator managing database operations and LLM interactions
-   - **Prompt Engineering**: Structured prompts including commit subject, file paths, and existing categories
+   - **Prompt Engineering**: Structured prompts including commit subject, file paths, and diff content
    - **Error Handling**: Graceful degradation if LLM unavailable (skips AI step, doesn't fail pipeline)
 
 3. **Squash Merge Limitation**:
@@ -162,7 +156,6 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 5. **Transaction Management**:
    - Each JSON load runs in a transaction (atomicity per repository)
    - Failed loads rollback automatically
-   - AI categorization processes commits in batches with transaction per batch
 
 ## Common Commands
 
@@ -198,41 +191,17 @@ Git Repos → Extract (JSON) → Load (PostgreSQL) → Categorize (Pattern + AI)
 # Skip AI enrichment (faster for large date ranges)
 ./scripts/run.rb --skip-ai
 
-# Two-stage workflow: Extract huge history, then enrich recent commits
-./scripts/run.rb --skip-ai --from "10 years ago" --to "now"
-./scripts/ai_categorize_commits.rb --from "3 months ago" --to "now"
-
 # Process single repository without AI
 ./scripts/run.rb mater --skip-ai
 ```
 
 ### Manual Operations
 ```bash
-# Extract single repository
+# Extract single repository (with AI categorization if AI_PROVIDER is set)
 ./scripts/git_extract_to_json.rb "6 months ago" "now" "data/repo.json" "repo-name" "/path/to/repo"
 
 # Load JSON to database
 ./scripts/load_json_to_db.rb data/repo.json
-
-# Pattern-based categorization (runs automatically in run.rb, but can run manually)
-./scripts/categorize_commits.rb
-./scripts/categorize_commits.rb --dry-run
-./scripts/categorize_commits.rb --repo mater
-
-# AI-powered categorization (runs automatically in run.rb if AI_PROVIDER is set)
-./scripts/ai_categorize_commits.rb                    # Categorize all uncategorized commits
-./scripts/ai_categorize_commits.rb --dry-run          # Preview without updating database
-./scripts/ai_categorize_commits.rb --repo mater       # Process single repository
-./scripts/ai_categorize_commits.rb --force            # Force recategorization of ALL commits
-./scripts/ai_categorize_commits.rb --limit 100        # Process only 100 commits
-./scripts/ai_categorize_commits.rb --debug            # Enable verbose output
-./scripts/ai_categorize_commits.rb --from "3 months ago" --to "now"     # Date range (git-style)
-./scripts/ai_categorize_commits.rb --from "2024-01-01" --to "2024-12-31"  # Date range (ISO format)
-
-# Weight synchronization (runs automatically in run.rb after weight calculation)
-./scripts/sync_commit_weights_from_categories.rb      # Sync all commit weights from categories
-./scripts/sync_commit_weights_from_categories.rb --dry-run  # Preview changes
-./scripts/sync_commit_weights_from_categories.rb --repo mater  # Single repository
 
 # Clean repository data
 ./scripts/clean_repository.rb mater
@@ -270,22 +239,14 @@ psql -d git_analytics -c "
   FROM commits;
 "
 
-# View categories and their usage
-psql -d git_analytics -c "SELECT name, usage_count, description FROM categories ORDER BY usage_count DESC LIMIT 20;"
-
-# View categories with their weights
-psql -d git_analytics -c "SELECT name, weight, usage_count, description FROM categories ORDER BY usage_count DESC LIMIT 20;"
-
-# Set category weight (admin operation)
-psql -d git_analytics -c "UPDATE categories SET weight = 50 WHERE name = 'EXPERIMENTAL';"
-
-# View commits affected by category weights
+# View category distribution (from commits table)
 psql -d git_analytics -c "
-  SELECT c.category, cat.weight, COUNT(*) as commits
-  FROM commits c
-  JOIN categories cat ON c.category = cat.name
-  WHERE c.weight > 0 AND cat.weight < 100
-  GROUP BY c.category, cat.weight;
+  SELECT category, COUNT(*) as usage_count
+  FROM commits
+  WHERE category IS NOT NULL
+  GROUP BY category
+  ORDER BY usage_count DESC
+  LIMIT 20;
 "
 
 # Find low-confidence AI categorizations for review
@@ -306,11 +267,10 @@ psql -d git_analytics -c "
   ORDER BY avg_efficiency ASC;
 "
 
-# View category weights and their impact
+# View category statistics
 psql -d git_analytics -c "
-  SELECT category, category_weight, total_commits, effective_commits
+  SELECT category, total_commits, effective_commits, avg_weight
   FROM v_category_stats
-  WHERE category_weight < 100
   ORDER BY total_commits DESC;
 "
 
@@ -570,10 +530,11 @@ Legacy numbered migrations (`001_*.sql`) can be converted to timestamp format:
 3. `20251109221637_add_users_and_oauth.rb` - Adds users and OAuth support tables
 4. `20251112075825_add_weight_and_ai_tools.rb` - Adds weight and ai_tools columns
 5. `20251112080000_create_standard_views.rb` - Creates standard analytics views and materialized views
-6. `20251116000000_create_category_views.rb` - Creates category analytics views
-7. `20251116160219_add_ai_categorization.rb` - Adds categories table and ai_confidence column
+6. `20251116000000_create_category_views.rb` - Creates category analytics views (includes categories table for dependencies)
+7. `20251116160219_add_ai_categorization.rb` - Adds ai_confidence column to commits table
 8. `20251116185136_add_category_weight.rb` - Adds weight column to categories table
 9. `20251122000000_create_personal_views.rb` - Creates personal performance views and updates helper functions
+10. `20251129160030_drop_categories_table_and_update_views.rb` - Drops categories table and updates views to remove category_weight
 
 **Auto-Seeding for Existing Databases:**
 If your database was set up with legacy SQL files, the setup script automatically detects this and seeds migrations 1, 5, 6, and 9 into `schema_migrations` to prevent re-execution.
@@ -595,28 +556,23 @@ If your database was set up with legacy SQL files, the setup script automaticall
 2. **After schema changes**: Run `./scripts/setup.sh --database-only` to recreate database
 3. **After loading new data**: Views refresh automatically via `run.rb` post-processing
 4. **When categorization coverage is low**:
-   - First, review `v_uncategorized_commits` and update team's commit message format for better pattern matching
-   - Then, enable AI categorization by setting `AI_PROVIDER` in `.env` (gemini, ollama, or anthropic)
-   - Run `./scripts/ai_categorize_commits.rb --dry-run` to preview AI categorization
+   - Enable AI categorization by setting `AI_PROVIDER` in `.env` (gemini, ollama, or anthropic)
+   - Re-run extraction with `./scripts/run.rb` to categorize commits
+   - Review `v_uncategorized_commits` for commits that couldn't be categorized
 5. **AI categorization best practices**:
-   - Start with `--dry-run` to preview categorizations before applying
-   - Use `--limit 100` for testing on small batches
    - Review low-confidence categorizations (< 70%) periodically
-   - Check categories table to consolidate similar categories (e.g., TECH vs TECHNOLOGY)
+   - Check category distribution to identify similar categories that could be consolidated
 6. **Before/After analysis**: Use date range filters to compare periods (e.g., before/after AI tool adoption)
 
 ## Known Limitations
 
 1. **Squash merges**: Branch names are lost, so work_type extraction by branch is not possible
 2. **Binary files**: Lines changed excludes binary files (marked with `-` in git numstat)
-3. **Commit subject only**: Only first line of commit message is analyzed by pattern matching
-4. **Category patterns**: Pattern-based categorization requires standardized commit message format for good coverage
-5. **Performance**: Large repositories may take time to extract (no streaming, all in-memory JSON)
-6. **AI categorization**:
-   - Requires JSON exports (doesn't work with database-only data)
-   - LLM API costs apply when using Gemini (Ollama is free but requires local setup)
+3. **Performance**: Large repositories may take time to extract (no streaming, all in-memory JSON)
+4. **AI categorization**:
+   - LLM API costs apply when using Gemini or Anthropic (Ollama is free but requires local setup)
    - Confidence scores are LLM-generated and may not always reflect accuracy
-   - Category consistency depends on prompt engineering and existing categories
+   - Extraction is slower with AI enabled due to API calls per commit
 
 ## Environment Variables
 

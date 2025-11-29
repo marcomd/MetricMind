@@ -14,6 +14,17 @@
 Sequel.migration do
   up do
     run <<-SQL
+      -- Create categories table if it doesn't exist (dependency for views)
+      CREATE TABLE IF NOT EXISTS categories (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL UNIQUE,
+        description TEXT,
+        usage_count INTEGER DEFAULT 0 NOT NULL,
+        weight INTEGER DEFAULT 100 CHECK (weight >= 0 AND weight <= 100),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
       -- View: Category statistics across all repositories
       CREATE VIEW v_category_stats AS
       SELECT

@@ -107,14 +107,6 @@ RSpec.describe 'PostgreSQL Views', :db_integration do
         expect(columns).to include('effective_commits')
         expect(columns).to include('avg_weight')
         expect(columns).to include('weight_efficiency_pct')
-        expect(columns).to include('category_weight')
-      end
-
-      it 'includes category_weight from categories table JOIN' do
-        result = conn.exec("SELECT * FROM v_category_stats LIMIT 0")
-        columns = result.fields
-
-        expect(columns).to include('category_weight')
       end
     end
 
@@ -126,7 +118,6 @@ RSpec.describe 'PostgreSQL Views', :db_integration do
         expect(columns).to include('effective_commits')
         expect(columns).to include('avg_weight')
         expect(columns).to include('weight_efficiency_pct')
-        expect(columns).to include('category_weight')
       end
     end
 
@@ -138,7 +129,6 @@ RSpec.describe 'PostgreSQL Views', :db_integration do
         expect(columns).to include('effective_commits')
         expect(columns).to include('avg_weight')
         expect(columns).to include('weight_efficiency_pct')
-        expect(columns).to include('category_weight')
       end
 
       it 'is a materialized view' do
@@ -158,18 +148,11 @@ RSpec.describe 'PostgreSQL Views', :db_integration do
       # Setup test data with varied weights
       conn.exec("DELETE FROM commits WHERE repository_id IN (SELECT id FROM repositories WHERE name = 'test-weight-repo')")
       conn.exec("DELETE FROM repositories WHERE name = 'test-weight-repo'")
-      conn.exec("DELETE FROM categories WHERE name = 'TEST_WEIGHT_CATEGORY'")
 
       @repo_id = conn.exec_params(
         "INSERT INTO repositories (name, url) VALUES ($1, $2) RETURNING id",
         ['test-weight-repo', '/test/path']
       )[0]['id']
-
-      # Create category with weight 50
-      conn.exec_params(
-        "INSERT INTO categories (name, weight) VALUES ($1, $2)",
-        ['TEST_WEIGHT_CATEGORY', 50]
-      )
 
       # Insert commits with different weights
       # Commit 1: weight=100 (full weight)
@@ -201,7 +184,6 @@ RSpec.describe 'PostgreSQL Views', :db_integration do
     after do
       conn.exec("DELETE FROM commits WHERE repository_id = #{@repo_id}")
       conn.exec("DELETE FROM repositories WHERE id = #{@repo_id}")
-      conn.exec("DELETE FROM categories WHERE name = 'TEST_WEIGHT_CATEGORY'")
     end
 
     it 'calculates effective_commits correctly' do
@@ -233,16 +215,6 @@ RSpec.describe 'PostgreSQL Views', :db_integration do
 
       # (1.5 effective / 2 total) * 100 = 75.0%
       expect(result[0]['weight_efficiency_pct'].to_f).to eq(75.0)
-    end
-
-    it 'includes category_weight from categories table' do
-      result = conn.exec("
-        SELECT category_weight
-        FROM v_category_stats
-        WHERE category = 'TEST_WEIGHT_CATEGORY'
-      ")
-
-      expect(result[0]['category_weight'].to_i).to eq(50)
     end
 
     it 'excludes reverted commits (weight=0) from views' do

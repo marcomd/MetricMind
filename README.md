@@ -237,28 +237,25 @@ Edit `config/repositories.json` to add your repositories:
 
 The `run.rb` script automatically:
 - Extracts git data from repositories (including full commit messages)
+- **Categorizes commits with AI** during extraction (extracts business domains, generates descriptions, calculates business impact)
 - Extracts AI tools information from commit bodies
 - Loads data into the database
-- **Categorizes commits** (extracts business domains from commit messages)
 - **Calculates commit weights** (detects and marks reverted commits)
-- **Synchronizes category weights** (applies category-level weights to commits)
 - **Refreshes materialized views** (for fast dashboard queries with weighted metrics)
 
 No additional steps needed - everything runs automatically!
 
 **What's included:**
 - ✅ Git data extraction from all configured repositories
+- ✅ **AI categorization during extraction** (category, description, confidence, business_impact)
 - ✅ AI tools tracking (extracts tools like Claude Code, Cursor, GitHub Copilot from commit bodies)
-- ✅ Database loading with duplicate prevention
-- ✅ **Automatic commit categorization** (extracts business domains like BILLING, CS, INFRA from commit messages)
+- ✅ Database loading with duplicate prevention (UPSERT updates existing records)
 - ✅ **Weight calculation** (detects revert/unrevert patterns and adjusts commit weights for accurate productivity metrics)
-- ✅ **Category weight synchronization** (applies category-level weights to commits for flexible prioritization)
 - ✅ **Materialized view refresh** (ensures dashboard queries are fast, includes both weighted and unweighted metrics)
 
 See sections below for details on:
 - [Commit Categorization](#commit-categorization)
 - [Weight Calculation (Revert Detection)](#weight-calculation-revert-detection)
-- [Category Weight Management](#category-weight-management)
 - [AI Tools Tracking](#ai-tools-tracking)
 
 ## Usage
@@ -282,19 +279,19 @@ Examples:
 
 ### Working with Large Date Ranges
 
-When extracting years of history, AI enrichment can be slow and expensive. Use the two-stage approach:
+When extracting years of history, AI enrichment can be slow and expensive. Use this approach:
 
 ```bash
 # Stage 1: Fast extraction of full history without AI
 ./scripts/run.rb --skip-ai --from "10 years ago" --to "now"
 
-# Stage 2: AI enrichment for recent commits only
-./scripts/ai_categorize_commits.rb --from "3 months ago" --to "now"
+# Stage 2: Re-run with AI for recent commits only
+./scripts/run.rb --from "3 months ago" --to "now"
 ```
 
 This workflow:
-1. Extracts all commits with pattern-based categorization only
-2. Adds AI descriptions and impact scores to recent commits
+1. Extracts all commits without AI categorization (fast)
+2. Re-runs extraction with AI for recent commits (updates existing records)
 3. Saves time and API costs by focusing AI on relevant data
 
 ### Load Data to Database
@@ -366,26 +363,13 @@ Stores per-commit data (granular level).
 | lines_deleted | INTEGER | Lines deleted (excluding binary) |
 | files_changed | INTEGER | Number of files modified |
 | category | VARCHAR(100) | Business domain category (e.g., BILLING, CS, INFRA) |
-| weight | INTEGER | Commit validity weight (0-100). Reverted commits = 0, valid commits = 100. Synced from category weight. |
+| weight | INTEGER | Commit validity weight (0-100). Reverted commits = 0, valid commits = 100. Based on business_impact. |
 | ai_tools | VARCHAR(255) | AI tools used (e.g., CLAUDE CODE, CURSOR, GITHUB COPILOT) |
 | ai_confidence | SMALLINT | AI categorization confidence (0-100). NULL if not AI-categorized. |
+| description | TEXT | AI-generated description of the commit changes. |
+| business_impact | SMALLINT | Business impact score (0-100). LOW 0-50, MEDIUM 51-99, HIGH 100. |
 
 **Unique constraint**: `(repository_id, hash)` - prevents duplicate commits
-
-#### `categories`
-Stores approved business domain categories for consistent categorization.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | SERIAL | Primary key |
-| name | VARCHAR(100) | Unique category name (UPPERCASE) |
-| description | TEXT | Optional category description |
-| usage_count | INTEGER | Number of commits with this category |
-| weight | INTEGER | Category weight (0-100). Default 100. Admin can adjust to de-prioritize categories. |
-| created_at | TIMESTAMP | Creation timestamp |
-| updated_at | TIMESTAMP | Last update timestamp |
-
-**Unique constraint**: `name` - prevents duplicate categories
 
 ### Views and Aggregations
 
@@ -418,15 +402,15 @@ Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_eff
 
 **`v_category_stats`**
 Category statistics across all repositories. Shows commit volume by business domain (e.g., BILLING, CS, INFRA).
-Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`.
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`.
 
 **`v_category_by_repo`**
 Category breakdown per repository. Shows which repos work on which categories.
-Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`.
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`.
 
 **`mv_monthly_category_stats` (Materialized)**
 Monthly trends by category. Shows how work distribution across business domains changes over time.
-Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`, `category_weight`.
+Includes weight analysis columns: `effective_commits`, `avg_weight`, `weight_efficiency_pct`.
 
 **`v_uncategorized_commits`**
 Commits missing category - useful for cleanup and improving coverage.
@@ -602,26 +586,6 @@ SELECT
 FROM mv_monthly_stats_by_repo
 WHERE month_start_date >= '2025-01-01'
 ORDER BY repository_name, year_month DESC;
-```
-
-### Category weight impact
-
-Identify categories with reduced weights and their impact on metrics:
-
-```sql
--- Categories with de-prioritized weights
-SELECT
-    category,
-    category_weight,
-    total_commits,
-    effective_commits,
-    ROUND((total_commits - effective_commits)::numeric, 2) as commits_discounted,
-    weight_efficiency_pct,
-    total_lines_changed,
-    weighted_lines_changed
-FROM v_category_stats
-WHERE category_weight < 100
-ORDER BY total_commits DESC;
 ```
 
 ### Weight efficiency by repository
@@ -956,40 +920,33 @@ If you need to completely clean and reload data for a repository:
 
 ## Commit Categorization
 
-The categorization feature analyzes commit messages to understand **what** business domains developers are working on. It uses a **two-stage approach**: pattern-based extraction (fast) followed by optional AI-powered categorization (intelligent).
+The categorization feature analyzes commit messages to understand **what** business domains developers are working on. AI categorization happens **during extraction** for maximum accuracy.
 
 ### Overview
 
 Categorization extracts **business domain categories** from commit subjects, enabling insights into resource allocation across different areas of your product (e.g., BILLING, CS, INFRA).
 
-**Note:** Categorization runs **automatically** as part of `./scripts/run.rb`. You don't need to run any manual commands unless you want to re-categorize existing data or check coverage.
+**Note:** Categorization runs **automatically** during extraction as part of `./scripts/run.rb`. Categories are scoped per repository for consistency.
 
-### Two-Stage Categorization
+### Extraction-Time AI Categorization
 
-#### Stage 1: Pattern-Based Extraction (Always Active)
+When AI is enabled, categorization happens during git extraction with access to:
+- Commit subject (message)
+- **Modified file paths** (strong signal, e.g., `app/jobs/billing/*` → BILLING)
+- **Git diff content** (actual code changes for context)
+- Existing categories from the same repository (ensures consistency)
 
-Categories are extracted from commit subjects using multiple patterns:
+**What AI generates per commit:**
+- 🏷️ **Category** - Business domain (e.g., BILLING, SECURITY, API)
+- 📝 **Description** - 2-4 sentence summary of changes
+- 📊 **Confidence** - How confident the AI is (0-100)
+- 💼 **Business Impact** - Value assessment (LOW 0-50, MEDIUM 51-99, HIGH 100)
 
+**Pattern-based fallback:**
+If AI is not enabled, pattern matching extracts categories from commit subjects:
 1. **Pipe delimiter**: `BILLING | Implemented payment gateway` → **BILLING**
 2. **Square brackets**: `[CS] Fixed widget display` → **CS**
 3. **First uppercase word**: `BILLING Implemented feature` → **BILLING**
-4. **No match**: → NULL (moves to Stage 2 if AI enabled)
-
-This stage is fast, requires no external services, and works well for teams using standardized commit message formats.
-
-#### Stage 2: AI-Powered Categorization (Optional)
-
-For commits that pattern matching couldn't categorize, the system can use Large Language Models (LLMs) to intelligently categorize based on:
-- Commit subject (message)
-- **Modified file paths** (strong signal, e.g., `app/jobs/billing/*` → BILLING)
-- Existing categories (ensures consistency)
-
-**Key Features:**
-- 🤖 **Smart categorization** using file paths as context
-- 🎯 **Category consistency** - reuses existing categories or creates appropriate new ones
-- 🚫 **Validates categories** - automatically rejects version numbers (2.58.0), issue numbers (#6802), and other invalid patterns
-- 📊 **Confidence scoring** - tracks how confident the AI is about each categorization
-- 🔄 **Fallback pattern** - only processes uncategorized commits (efficient)
 
 **Supported Providers:**
 - **Ollama** (free, local) - Run models like llama3.2, mistral, codellama on your machine
@@ -1051,36 +1008,27 @@ PREVENT_NUMERIC_CATEGORIES=true  # Prevents version numbers like "2.58.0"
 ./scripts/setup.rb --database-only
 ```
 
-This creates:
-- `categories` table - stores approved categories
-- `ai_confidence` column in `commits` - tracks AI categorization quality (0-100)
-
 3. **Run the pipeline:**
 ```bash
-# AI categorization runs automatically if AI_PROVIDER is set
+# AI categorization runs automatically during extraction if AI_PROVIDER is set
 ./scripts/run.rb
 
 # Or test on a single repository
 ./scripts/run.rb mater
 ```
 
-#### Scenario: First Time with Existing Data
+#### Scenario: Adding AI to Existing Data
 
 If you already have data in your database and want to add AI categorization:
 
 ```bash
 # 1. Configure AI provider in .env (see above)
 
-# 2. Apply migration
-./scripts/setup.rb --database-only
+# 2. Re-run extraction for the date range you want to categorize
+# This will UPSERT existing commits with new AI-generated fields
+./scripts/run.rb --from "3 months ago" --to "now"
 
-# 3. Preview what AI will categorize (dry-run)
-./scripts/ai_categorize_commits.rb --dry-run --limit 10
-
-# 4. Run AI categorization on all uncategorized commits
-./scripts/ai_categorize_commits.rb
-
-# 5. Check results
+# 3. Check results
 psql -d git_analytics -c "
   SELECT
     COUNT(*) FILTER (WHERE category IS NOT NULL) as categorized,
@@ -1092,58 +1040,17 @@ psql -d git_analytics -c "
 
 #### Scenario: Recategorizing Existing Data
 
-To re-run AI categorization (e.g., after improving prompts or switching providers):
+To re-run AI categorization (e.g., after improving prompts or switching providers), simply re-extract:
 
 ```bash
-# Preview changes first
-./scripts/ai_categorize_commits.rb --dry-run --force --limit 10
+# Re-extract to update AI fields (UPSERT updates existing commits)
+./scripts/run.rb --from "3 months ago" --to "now"
 
-# Force recategorization of ALL commits (including already categorized ones)
-./scripts/ai_categorize_commits.rb --force
-
-# Or recategorize only a specific repository
-./scripts/ai_categorize_commits.rb --force --repo mater
+# Or for a specific repository
+./scripts/run.rb mater --from "3 months ago"
 ```
 
-**Note:** Using `--force` will re-categorize ALL commits, replacing existing categories. This is safe but may change your historical data.
-
-#### Scenario: Categorizing Only New Commits
-
-The default behavior only processes uncategorized commits:
-
-```bash
-# This only categorizes commits where category IS NULL
-./scripts/ai_categorize_commits.rb
-
-# Happens automatically with run.rb
-./scripts/run.rb
-```
-
-This is the recommended workflow for ongoing use.
-
-#### Scenario: Date Range Filtering
-
-Process only commits within a specific date range (useful for incremental processing):
-
-```bash
-# Categorize recent commits only (git-style dates)
-./scripts/ai_categorize_commits.rb --from "3 months ago" --to "now"
-
-# Categorize specific date range (ISO format)
-./scripts/ai_categorize_commits.rb --from "2024-01-01" --to "2024-12-31"
-
-# Categorize only from a specific date onwards
-./scripts/ai_categorize_commits.rb --from "6 months ago"
-
-# Combine with other options
-./scripts/ai_categorize_commits.rb --repo mater --from "1 year ago" --limit 100 --dry-run
-```
-
-**Supported date formats:**
-- **Git-style**: "6 months ago", "1 year ago", "3 weeks ago", "now"
-- **ISO format**: "2024-01-01", "2024-12-31"
-
-**Note:** Commits are always processed in descending order by `commit_date` (newest first), ensuring recent commits are prioritized.
+**Note:** Re-extraction will update AI-generated fields (category, description, business_impact, ai_confidence) while preserving original commit metadata.
 
 ### Numeric Category Prevention
 
@@ -1174,21 +1081,6 @@ PREVENT_NUMERIC_CATEGORIES=false
 ```
 
 The AI is explicitly instructed to avoid these patterns, and validation is enforced at the code level.
-
-### Manual Usage (Optional)
-
-Categorization runs automatically with `./scripts/run.rb`, but you can also run it manually:
-
-```bash
-# Re-run categorization on all commits (useful after updating commit messages)
-./scripts/categorize_commits.rb
-
-# Preview changes without applying (dry-run)
-./scripts/categorize_commits.rb --dry-run
-
-# Categorize specific repository only
-./scripts/categorize_commits.rb --repo mater
-```
 
 ### Checking Coverage
 
@@ -1355,138 +1247,6 @@ FROM commits;
 - **Quality insights**: Track revert rates to measure code quality
 - **Before/after analysis**: Compare weighted vs unweighted metrics to assess tool impact
 - **Team health**: High revert rates may indicate rushed work or insufficient testing
-
-## Category Weight Management
-
-The category weight management feature allows administrators to adjust the weight of entire categories, enabling **de-prioritization of specific work types** in productivity analytics.
-
-### Overview
-
-Each category in the `categories` table has a `weight` field (0-100):
-- **weight = 100**: Normal priority (default)
-- **weight < 100**: De-prioritized category
-- **weight = 0**: Excluded from weighted metrics
-
-This allows you to:
-- De-prioritize experimental or exploratory work
-- Exclude maintenance work from productivity calculations
-- Focus metrics on business-critical categories
-
-**Note:** Weight synchronization runs **automatically** as part of `./scripts/run.rb` after revert detection!
-
-### How It Works
-
-**Workflow:**
-1. Admin sets category weight in database (e.g., `UPDATE categories SET weight = 50 WHERE name = 'EXPERIMENTAL'`)
-2. Weight sync script runs (automatically via `run.rb` or manually)
-3. All commits with that category (except reverted ones) get their weight updated
-4. Analytics views now reflect the adjusted weights
-
-**Important:** The sync only updates commits with `weight > 0`, preserving reverted commits at weight = 0.
-
-### Managing Category Weights
-
-```bash
-# Set category weight (admin operation via SQL)
-psql -d git_analytics -c "UPDATE categories SET weight = 50 WHERE name = 'EXPERIMENTAL';"
-
-# Sync commit weights (runs automatically in run.rb)
-./scripts/sync_commit_weights_from_categories.rb
-
-# Preview changes without applying (dry-run)
-./scripts/sync_commit_weights_from_categories.rb --dry-run
-
-# Sync specific repository only
-./scripts/sync_commit_weights_from_categories.rb --repo mater
-```
-
-### Viewing Category Weights
-
-```sql
--- View all categories with their weights
-SELECT name, weight, usage_count, description
-FROM categories
-ORDER BY usage_count DESC;
-
--- View commits with reduced weight due to category
-SELECT
-  c.category,
-  cat.weight as category_weight,
-  COUNT(*) as commits_affected
-FROM commits c
-JOIN categories cat ON c.category = cat.name
-WHERE c.weight > 0 AND cat.weight < 100
-GROUP BY c.category, cat.weight
-ORDER BY commits_affected DESC;
-```
-
-### Use Cases
-
-**Example 1: De-prioritize experimental work**
-```sql
--- Experimental features count at 50% weight
-UPDATE categories SET weight = 50 WHERE name = 'EXPERIMENTAL';
-```
-
-**Example 2: Exclude prototype work**
-```sql
--- Prototypes don't count in productivity metrics
-UPDATE categories SET weight = 0 WHERE name = 'PROTOTYPE';
-```
-
-**Example 3: Reduce infrastructure work**
-```sql
--- Infrastructure work counts at 75% weight
-UPDATE categories SET weight = 75 WHERE name = 'INFRA';
-```
-
-### Benefits
-
-- **Flexible prioritization**: Adjust category importance without deleting data
-- **Focus on business value**: Emphasize categories that matter most
-- **Fair comparisons**: Account for different types of work in productivity metrics
-- **Reversible**: Change weights anytime and resync to reflect new priorities
-
-### Analyzing Weight Impact
-
-After adjusting category weights, use these queries to analyze the impact:
-
-```sql
--- View weight efficiency across repositories
-psql -d git_analytics -c "
-  SELECT
-    repository_name,
-    SUM(total_commits) as commits,
-    ROUND(SUM(effective_commits), 2) as effective_commits,
-    ROUND(AVG(weight_efficiency_pct), 1) as avg_efficiency_pct
-  FROM mv_monthly_stats_by_repo
-  GROUP BY repository_name
-  ORDER BY commits DESC;
-"
-
--- View category weights and their impact
-psql -d git_analytics -c "
-  SELECT
-    category,
-    category_weight,
-    total_commits,
-    effective_commits,
-    weight_efficiency_pct
-  FROM v_category_stats
-  WHERE category_weight < 100
-  ORDER BY total_commits DESC;
-"
-
--- Check which commits are affected by category weights
-psql -d git_analytics -c "
-  SELECT c.category, cat.weight, COUNT(*) as commits
-  FROM commits c
-  JOIN categories cat ON c.category = cat.name
-  WHERE c.weight > 0 AND cat.weight < 100
-  GROUP BY c.category, cat.weight
-  ORDER BY commits DESC;
-"
-```
 
 ## AI Tools Tracking
 
@@ -1824,11 +1584,10 @@ The frontend should provide these main views:
 - "Which repositories contribute to customer service improvements?"
 
 **Category Extraction Logic**:
-Categories are automatically extracted from commit subjects using:
-1. Pipe delimiter: `BILLING | Implemented feature` → BILLING
-2. Square brackets: `[CS] Fixed bug` → CS
-3. First uppercase word: `BILLING Implemented feature` → BILLING
-4. If no match: NULL (shown as "UNCATEGORIZED" in UI)
+Categories are extracted using AI (when enabled) or pattern matching:
+1. **AI Categorization** (primary): Uses LLM to analyze commit subject, file paths, and diff content
+2. **Pattern fallback**: Pipe delimiter (`BILLING | ...`), square brackets (`[CS] ...`), or first uppercase word
+3. If no match: NULL (shown as "UNCATEGORIZED" in UI)
 
 ## Contributing
 

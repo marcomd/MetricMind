@@ -103,15 +103,14 @@ module LLM
         3. Categories should be SHORT (1-2 words), UPPERCASE, business-focused
         4. Consider file paths and diff as strong signals (e.g., app/jobs/billing/* → BILLING)
         5. Provide a confidence score (0-100) for your categorization
-        6. IMPORTANT: Categories must start with a LETTER, not a number or special character
-        7. AVOID: Version numbers (2.58.0), issue numbers (#6802), years (2023), purely numeric values
-        8. PREFER: Business domains (BILLING, SECURITY), technical areas (API, DATABASE), or features (AUTH, REPORTING)
-        9. Write a DESCRIPTION (2-4 sentences) explaining what changed and why, using the diff details
-        10. Assess the BUSINESS_IMPACT (0-100) based on these guidelines:
-            - LOW (0-30): Configuration files (yaml, json, etc.)
-            - MEDIUM (31-60): Refactors (renames, repetitive changes)
-            - HIGH (61-100): Features, bugs, security fixes
-            - DEFAULT: Use 100 for typical commits. Only lower if clearly config/refactor work.
+        6. Categories must start with a LETTER, not a number or special character. AVOID: Version numbers (2.58.0), issue numbers (#6802), years (2023), purely numeric values
+        7. PREFER: Business domains (BILLING, SECURITY), technical areas (API, DATABASE), or features (AUTH, REPORTING)
+        8. Write a DESCRIPTION (2-4 sentences) explaining what changed and why, using the diff details
+        9. Assess the BUSINESS_IMPACT (0-100) based on these guidelines:
+            - LOW (0-50): Configuration files (yaml, json, etc.)
+            - MEDIUM (51-99): Refactors (renames, repetitive changes)
+            - HIGH (100): Features, bugs, security fixes
+            - DEFAULT: Use 100 for typical commits. Only lower if low value work.
 
         RESPONSE FORMAT (respond with ONLY this format, no extra text):
         CATEGORY: <category_name>

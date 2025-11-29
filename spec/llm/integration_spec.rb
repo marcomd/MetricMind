@@ -3,7 +3,6 @@
 require 'spec_helper'
 require_relative '../../lib/llm/ollama_client'
 require_relative '../../lib/llm/anthropic_client'
-require_relative '../../lib/llm/categorizer'
 require 'socket'
 
 RSpec.describe 'AI Categorization Integration', :integration do
@@ -278,71 +277,6 @@ RSpec.describe 'AI Categorization Integration', :integration do
         expect(e.message).to include('Invalid category')
         puts "\n[E2E Test] Validation correctly rejected numeric category from Anthropic"
       end
-    end
-  end
-
-  describe 'Full categorization workflow' do
-    let(:test_db) { ENV['PGDATABASE_TEST'] || 'git_analytics_test' }
-    let(:conn) { PG.connect(dbname: test_db) }
-    let(:client) { LLM::OllamaClient.new }
-    let(:categorizer) { LLM::Categorizer.new(client: client, conn: conn) }
-
-    after do
-      categorizer&.close
-    end
-
-    it 'performs end-to-end categorization with database' do
-      # Set up test data
-      conn.exec('INSERT INTO repositories (name) VALUES ($1) ON CONFLICT DO NOTHING', ['test-repo'])
-      repo_result = conn.exec("SELECT id FROM repositories WHERE name = 'test-repo'")
-      repo_id = repo_result[0]['id']
-
-      # Insert test commit
-      conn.exec(
-        'INSERT INTO commits (repository_id, hash, commit_date, author_name, author_email, subject, files_changed)
-         VALUES ($1, $2, NOW(), $3, $4, $5, 1)
-         ON CONFLICT (repository_id, hash) DO NOTHING',
-        [repo_id, 'integration_test_hash', 'Test Author', 'test@example.com', 'Fix billing calculation']
-      )
-
-      commits = [
-        {
-          'hash' => 'integration_test_hash',
-          'subject' => 'Fix billing calculation',
-          'repository_id' => repo_id
-        }
-      ]
-
-      json_data = {
-        'commits' => [
-          {
-            'hash' => 'integration_test_hash',
-            'files' => [
-              { 'filename' => 'app/services/billing/calculator.rb' }
-            ]
-          }
-        ]
-      }
-
-      categorizer.categorize_commits(commits, json_data, batch_size: 10)
-
-      expect(categorizer.stats[:processed]).to eq(1)
-      expect(categorizer.stats[:categorized]).to eq(1)
-
-      # Verify database was updated
-      result = conn.exec(
-        'SELECT category, ai_confidence FROM commits WHERE hash = $1 AND repository_id = $2',
-        ['integration_test_hash', repo_id]
-      )
-
-      expect(result.ntuples).to eq(1)
-      expect(result[0]['category']).not_to be_nil
-      expect(result[0]['ai_confidence'].to_i).to be_between(0, 100)
-
-      puts "\n[Integration Test] Database Updated:"
-      puts "  Category: #{result[0]['category']}"
-      puts "  Confidence: #{result[0]['ai_confidence']}%"
-      puts "  Stats: #{categorizer.stats.inspect}"
     end
   end
 end

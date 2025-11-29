@@ -312,14 +312,13 @@ class RunScript
 
     if options[:skip_ai]
       log_info('Note: AI enrichment was skipped during extraction (--skip-ai)')
-      log_info('      To enrich commits later: ./scripts/ai_categorize_commits.rb --from "3 months ago"')
+      log_info('      Re-run extraction without --skip-ai to enable categorization and descriptions')
     else
       log_info('Note: Categorization and description generation happened during extraction')
     end
     puts ''
 
     calculate_weights
-    sync_commit_weights
     refresh_views
 
     puts ''
@@ -343,26 +342,8 @@ class RunScript
     puts ''
   end
 
-  def sync_commit_weights
-    log_info('Step 2: Synchronizing commit weights from categories...')
-
-    script_path = File.join(@script_dir, 'sync_commit_weights_from_categories.rb')
-    args = []
-    args += ['--repo', options[:repo_name]] if options[:repo_name]
-
-    success = system(script_path, *args)
-
-    if success
-      log_success('Commit weights synchronized')
-    else
-      log_warning('Weight synchronization completed with warnings')
-    end
-
-    puts ''
-  end
-
   def refresh_views
-    log_info('Step 3: Refreshing materialized views...')
+    log_info('Step 2: Refreshing materialized views...')
 
     db_name = ENV['PGDATABASE'] || 'git_analytics'
     sql = 'SELECT refresh_all_mv(); SELECT refresh_category_mv();'

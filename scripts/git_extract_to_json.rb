@@ -371,11 +371,25 @@ class GitExtractor
     end
   end
 
-  # Loads existing categories from the database
+  # Loads existing categories from the commits table for the current repository
+  # Categories are scoped by repository to ensure consistency within each repo
   # @return [void]
   def load_existing_categories
     db = SequelConnection.db
-    @existing_categories = db[:categories].select_map(:name).sort
+    # Find the repository ID for the current repo
+    repo = db[:repositories].where(name: @repo_name).first
+    unless repo
+      @existing_categories = []
+      return
+    end
+
+    @existing_categories = db[:commits]
+      .where(repository_id: repo[:id])
+      .select(:category)
+      .distinct
+      .exclude(category: nil)
+      .map(:category)
+      .sort
   rescue StandardError => e
     warn "Warning: Could not load existing categories: #{e.message}"
     @existing_categories = []

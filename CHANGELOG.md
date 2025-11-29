@@ -5,6 +5,79 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2025-11-29
+
+### Changed
+- **Categorization moved to extraction phase**:
+  - AI categorization now happens during `git_extract_to_json.rb` extraction, not as DB post-processing
+  - Uses commit subject, file paths, and git diff content for more accurate categorization
+  - More efficient: categorizes once during extraction instead of separate DB pass
+  - Existing categories now loaded from `commits` table (was `categories` table)
+- **Categories scoped by repository**:
+  - `load_existing_categories` now filters by repository for category consistency
+  - Each repo maintains its own category vocabulary
+- **Business impact scoring clarified**:
+  - LOW (0-50): Low-value work (typos, formatting, minor tweaks)
+  - MEDIUM (51-99): Moderate business value
+  - HIGH (100): Default for typical commits - features, bug fixes, improvements
+  - Tests added for business_impact parsing and defaults
+- **Simplified post-processing workflow**:
+  - `run.rb` post-processing reduced from 4 steps to 2 steps
+  - Step 1: Weight calculation for revert detection
+  - Step 2: Refresh materialized views
+- **Category views updated**:
+  - Removed `category_weight` column from all category views (was joined from categories table)
+  - Views now simpler without categories table dependency
+
+### Removed
+- **Dropped `categories` table**:
+  - Categories no longer stored in separate table
+  - Category names stored directly in `commits.category` column
+  - Migration: `20251129160030_drop_categories_table_and_update_views.rb`
+- **Removed DB-side categorization scripts**:
+  - `scripts/categorize_commits.rb` - Pattern-based DB categorization (now in extraction)
+  - `scripts/ai_categorize_commits.rb` - AI-based DB categorization (now in extraction)
+  - `scripts/sync_commit_weights_from_categories.rb` - Category weight sync (no longer needed)
+- **Removed categorization library**:
+  - `lib/llm/categorizer.rb` - DB-side AI orchestrator (no longer needed)
+- **Removed related tests**:
+  - `spec/categorize_commits_validation_spec.rb`
+  - `spec/ai_categorize_commits_spec.rb`
+  - `spec/sync_commit_weights_from_categories_spec.rb`
+  - `spec/llm/categorizer_spec.rb`
+
+### Fixed
+- **PostgreSQL syntax error in migration**:
+  - Fixed `ADD CONSTRAINT IF NOT EXISTS` (not valid PostgreSQL)
+  - Changed to DO block with IF NOT EXISTS check
+- **View dependency issue**:
+  - Category views migration now creates categories table first for dependency resolution
+  - Drop migration properly handles view dependencies
+
+### Migration Guide
+If upgrading from 1.7.0:
+
+1. **Apply migration** to drop categories table and update views:
+```bash
+./scripts/db_migrate.rb
+```
+
+2. **Re-run extraction** for repositories to populate categories (if needed):
+```bash
+./scripts/run.rb
+```
+
+**Note**: Category names are preserved in `commits.category` column. Only the separate `categories` table is removed.
+
+### Breaking Changes
+- `categories` table no longer exists - queries referencing it will fail
+- `category_weight` column removed from category views
+- Manual categorization scripts removed (use extraction with AI instead)
+- Category weight management feature removed (use `business_impact` on commits instead)
+
+### Testing
+All 271 tests pass. 9 pending (integration tests requiring real API keys).
+
 ## [1.7.0] - 2025-11-28
 
 ### Changed

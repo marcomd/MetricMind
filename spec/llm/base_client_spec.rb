@@ -190,6 +190,106 @@ RSpec.describe LLM::BaseClient do
         client.send(:parse_categorization_response, response)
       end.to raise_error(LLM::BaseClient::APIError, /Invalid category/)
     end
+
+    # Business impact tests (LOW 0-50, MEDIUM 51-99, HIGH 100, DEFAULT 100)
+    context 'business_impact parsing' do
+      it 'parses business_impact from response' do
+        response = <<~RESPONSE
+          CATEGORY: BILLING
+          CONFIDENCE: 90
+          BUSINESS_IMPACT: 85
+          REASON: Important feature work
+        RESPONSE
+
+        result = client.send(:parse_categorization_response, response)
+        expect(result[:business_impact]).to eq(85)
+      end
+
+      it 'defaults business_impact to 100 when missing (typical commits are HIGH value)' do
+        response = <<~RESPONSE
+          CATEGORY: SECURITY
+          CONFIDENCE: 90
+          REASON: Security fix
+        RESPONSE
+
+        result = client.send(:parse_categorization_response, response)
+        expect(result[:business_impact]).to eq(100)
+      end
+
+      it 'clamps business_impact to 0-100 range (handles values over 100)' do
+        response = <<~RESPONSE
+          CATEGORY: FEATURE
+          CONFIDENCE: 90
+          BUSINESS_IMPACT: 150
+          REASON: Over limit
+        RESPONSE
+
+        result = client.send(:parse_categorization_response, response)
+        expect(result[:business_impact]).to eq(100)
+      end
+
+      it 'accepts business_impact of 0 (minimum value)' do
+        response = <<~RESPONSE
+          CATEGORY: CONFIG
+          CONFIDENCE: 90
+          BUSINESS_IMPACT: 0
+          REASON: Zero impact value
+        RESPONSE
+
+        result = client.send(:parse_categorization_response, response)
+        expect(result[:business_impact]).to eq(0)
+      end
+
+      it 'parses LOW business_impact (0-50) for config files' do
+        response = <<~RESPONSE
+          CATEGORY: CONFIG
+          CONFIDENCE: 85
+          BUSINESS_IMPACT: 30
+          REASON: Configuration file changes - low business impact
+        RESPONSE
+
+        result = client.send(:parse_categorization_response, response)
+        expect(result[:business_impact]).to eq(30)
+        expect(result[:business_impact]).to be_between(0, 50) # LOW range
+      end
+
+      it 'parses MEDIUM business_impact (51-99) for refactors' do
+        response = <<~RESPONSE
+          CATEGORY: REFACTOR
+          CONFIDENCE: 80
+          BUSINESS_IMPACT: 75
+          REASON: Code refactoring - medium business impact
+        RESPONSE
+
+        result = client.send(:parse_categorization_response, response)
+        expect(result[:business_impact]).to eq(75)
+        expect(result[:business_impact]).to be_between(51, 99) # MEDIUM range
+      end
+
+      it 'parses HIGH business_impact (100) for features/bugs/security' do
+        response = <<~RESPONSE
+          CATEGORY: SECURITY
+          CONFIDENCE: 95
+          BUSINESS_IMPACT: 100
+          REASON: Critical security fix - high business impact
+        RESPONSE
+
+        result = client.send(:parse_categorization_response, response)
+        expect(result[:business_impact]).to eq(100) # HIGH value
+      end
+
+      it 'handles case-insensitive BUSINESS_IMPACT parsing' do
+        response = <<~RESPONSE
+          CATEGORY: API
+          CONFIDENCE: 85
+          business_impact: 60
+          REASON: API changes
+        RESPONSE
+
+        result = client.send(:parse_categorization_response, response)
+        expect(result[:business_impact]).to eq(60)
+      end
+    end
   end
 
   describe '#build_categorization_prompt' do
