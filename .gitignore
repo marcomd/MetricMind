@@ -50,4 +50,5 @@ Thumbs.db
 /config/repositories.json
 
 # AI Tools
-.claude/settings.local.json
+.claude/
+scripts/custom/

@@ -385,9 +385,10 @@ class GitExtractor
 
     @existing_categories = db[:commits]
       .where(repository_id: repo[:id])
-      .select(:category)
-      .distinct
       .exclude(category: nil)
+      .group(:category)
+      .having { count.function.* > 1 }
+      .select(:category)
       .map(:category)
       .sort
   rescue StandardError => e
